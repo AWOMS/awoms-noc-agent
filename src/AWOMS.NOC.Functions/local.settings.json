@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "ApiKey": "dev-api-key-change-in-production",
+    "EmailAlerts_Enabled": "false",
+    "EmailAlerts_To": "alerts@yourdomain.com",
+    "TeamsAlerts_WebhookUrl": "",
+    "GenericWebhook_Url": ""
+  }
+}

@@ -1,0 +1,96 @@
+name: Build Agent
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+    paths:
+      - 'src/AWOMS.NOC.Agent/**'
+      - 'src/AWOMS.NOC.Shared/**'
+      - '.github/workflows/build-agent.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/AWOMS.NOC.Agent/**'
+      - 'src/AWOMS.NOC.Shared/**'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj
+    
+    - name: Build
+      run: dotnet build src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj --configuration Release --no-restore
+    
+    - name: Publish Windows x64
+      run: |
+        dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          --output ./publish/win-x64 `
+          /p:PublishSingleFile=true `
+          /p:PublishTrimmed=false
+    
+    - name: Copy installation scripts
+      run: |
+        Copy-Item scripts/Install-Agent.ps1 ./publish/win-x64/
+        Copy-Item scripts/Uninstall-Agent.ps1 ./publish/win-x64/
+    
+    - name: Create ZIP archive
+      run: |
+        Compress-Archive -Path ./publish/win-x64/* -DestinationPath ./AWOMS.NOC.Agent-win-x64.zip
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AWOMS.NOC.Agent-win-x64
+        path: ./AWOMS.NOC.Agent-win-x64.zip
+    
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: AWOMS.NOC.Agent-win-x64
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          AWOMS.NOC.Agent-win-x64.zip
+        body: |
+          ## AWOMS NOC Agent Release ${{ github.ref_name }}
+          
+          ### Installation
+          1. Download `AWOMS.NOC.Agent-win-x64.zip`
+          2. Extract to a temporary directory
+          3. Run as Administrator:
+          ```powershell
+          .\Install-Agent.ps1 -ApiEndpoint "https://your-function-app.azurewebsites.net" -ApiKey "your-api-key"
+          ```
+          
+          ### What's Changed
+          See commit history for details.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

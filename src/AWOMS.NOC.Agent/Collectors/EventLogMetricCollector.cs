@@ -46,7 +46,7 @@ public class EventLogMetricCollector : IMetricCollector
                 {
                     Category = "EventLog",
                     Name = $"Critical Event ({evt.Source})",
-                    Value = $"EventID: {evt.InstanceId}, Message: {evt.Message?.Substring(0, Math.Min(200, evt.Message.Length ?? 0))}",
+                    Value = $"EventID: {evt.InstanceId}, Message: {(evt.Message != null ? evt.Message.Substring(0, Math.Min(200, evt.Message.Length)) : string.Empty)}",
                     Unit = "event",
                     Timestamp = evt.TimeGenerated
                 });
