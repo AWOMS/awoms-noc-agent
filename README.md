@@ -82,19 +82,22 @@ Configurable thresholds with multi-channel alert delivery:
 
 ### 1. Deploy Azure Infrastructure
 
-```powershell
-# Clone the repository
-git clone https://github.com/AWOMS/awoms-noc-agent.git
-cd awoms-noc-agent
+### 1. Deploy Azure Infrastructure
 
-# Login to Azure
-az login
+Follow the step-by-step manual deployment guide:
 
-# Deploy infrastructure
-.\scripts\Deploy-Azure.ps1 -ResourceGroupName "rg-awoms-noc" -Location "eastus" -EnvironmentName "prod"
-```
+📖 **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md)**
 
-The script will output your Function App URL and API Key. Save these for agent installation.
+The guide walks you through creating all required Azure resources using the Azure Portal:
+- Resource Group
+- Storage Account (with tables and queue)
+- Application Insights
+- Key Vault
+- Function App
+
+After completing the deployment, you'll have:
+- Your Function App URL
+- API Key stored in Key Vault
 
 ### 2. Deploy Function App Code
 
@@ -146,27 +149,28 @@ Edit `appsettings.json` to customize agent behavior:
 | `ReportingIntervalSeconds` | How often to send telemetry | 300 |
 | `EnableLocalAlerts` | Evaluate alerts locally for immediate critical alerts | true |
 
-### Alert Configuration
-
-Configure in Azure Function App settings (Azure Portal or using Azure CLI):
-
-```powershell
-# Email alerts
-az functionapp config appsettings set --name <function-app-name> --resource-group <rg-name> \
-  --settings EmailAlerts_Enabled=true EmailAlerts_To=alerts@yourdomain.com
-
-# Teams webhook
-az functionapp config appsettings set --name <function-app-name> --resource-group <rg-name> \
-  --settings TeamsAlerts_WebhookUrl=https://your-teams-webhook-url
-
-# Generic webhook
-az functionapp config appsettings set --name <function-app-name> --resource-group <rg-name> \
-  --settings GenericWebhook_Url=https://your-custom-webhook
-```
-
 ### Alert Thresholds
 
-Default thresholds (defined in `AWOMS.NOC.Shared/Constants.cs`):
+Thresholds are configured in the agent's `appsettings.json` file and can be customized per deployment:
+
+```json
+{
+  "Thresholds": {
+    "DiskSpaceCriticalPercent": 10.0,
+    "DiskSpaceWarningPercent": 20.0,
+    "MemoryUsageCriticalPercent": 90.0,
+    "MemoryUsageWarningPercent": 80.0,
+    "CpuUsageCriticalPercent": 95.0,
+    "CpuUsageWarningPercent": 85.0,
+    "DiskQueueCritical": 3.0,
+    "DiskQueueSustainedMinutes": 15,
+    "HeartbeatTimeoutMinutes": 5,
+    "WindowsUpdatePendingDays": 7
+  }
+}
+```
+
+Default threshold values:
 
 | Metric | Warning | Critical | Notes |
 |--------|---------|----------|-------|
@@ -178,6 +182,17 @@ Default thresholds (defined in `AWOMS.NOC.Shared/Constants.cs`):
 | Windows Updates | N/A | > 7 days | Since last update |
 | Antivirus Status | Outdated | Disabled | Security risk |
 | Critical Services | N/A | Stopped | Service failure |
+
+To customize thresholds, edit the agent's `appsettings.json` before installation or update it on deployed agents.
+
+### Alert Channel Configuration
+
+Configure alert channels in Azure Function App settings (see the [Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md) for details):
+
+- **Email Alerts**: Set `EmailAlerts_Enabled=true` and `EmailAlerts_To`
+- **Teams Alerts**: Set `TeamsAlerts_WebhookUrl` with your webhook URL
+- **Generic Webhook**: Set `GenericWebhook_Url` for custom integrations
+- **Heartbeat Timeout**: Set `HeartbeatTimeoutMinutes` (default: 5)
 
 ## Monitoring and Alerting
 
@@ -314,13 +329,11 @@ awoms-noc-agent/
 ├── .github/workflows/          # CI/CD pipelines
 │   ├── build-agent.yml         # Build and release agent
 │   └── deploy-functions.yml    # Deploy Azure Functions
-├── infrastructure/             # Infrastructure as Code
-│   ├── main.bicep              # Azure resources
-│   └── parameters.json         # Deployment parameters
+├── docs/                       # Documentation
+│   └── AZURE_DEPLOYMENT.md     # Manual Azure deployment guide
 ├── scripts/                    # PowerShell scripts
 │   ├── Install-Agent.ps1       # Agent installer
-│   ├── Uninstall-Agent.ps1     # Agent uninstaller
-│   └── Deploy-Azure.ps1        # Azure deployment
+│   └── Uninstall-Agent.ps1     # Agent uninstaller
 ├── src/
 │   ├── AWOMS.NOC.Shared/       # Shared models and constants
 │   ├── AWOMS.NOC.Agent/        # Windows Service agent

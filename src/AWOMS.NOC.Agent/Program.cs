@@ -16,6 +16,11 @@ var agentConfig = new AgentConfiguration();
 builder.Configuration.GetSection("AgentConfiguration").Bind(agentConfig);
 builder.Services.AddSingleton(agentConfig);
 
+// Configure Thresholds from appsettings.json
+var thresholdsConfig = new ThresholdsConfiguration();
+builder.Configuration.GetSection("Thresholds").Bind(thresholdsConfig);
+builder.Services.AddSingleton(thresholdsConfig);
+
 // Register collectors
 builder.Services.AddSingleton<IMetricCollector, CpuMetricCollector>();
 builder.Services.AddSingleton<IMetricCollector, DiskMetricCollector>();

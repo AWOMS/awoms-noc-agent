@@ -28,11 +28,14 @@ public class HeartbeatMonitor
 
         try
         {
+            // Get timeout value from configuration (default to 5 minutes)
+            var heartbeatTimeoutMinutes = int.TryParse(Environment.GetEnvironmentVariable("HeartbeatTimeoutMinutes"), out var timeout) ? timeout : 5;
+
             var machineTable = _tableServiceClient.GetTableClient(Constants.MachineTableName);
             await machineTable.CreateIfNotExistsAsync();
 
             var machines = machineTable.QueryAsync<MachineEntity>(filter: $"PartitionKey eq 'machines'");
-            var timeoutThreshold = DateTime.UtcNow.AddMinutes(-Thresholds.HeartbeatTimeoutMinutes);
+            var timeoutThreshold = DateTime.UtcNow.AddMinutes(-heartbeatTimeoutMinutes);
 
             await foreach (var machine in machines)
             {
@@ -52,9 +55,9 @@ public class HeartbeatMonitor
                             Severity = "Critical",
                             Category = "Heartbeat",
                             MetricName = "Heartbeat Timeout",
-                            Message = $"Machine {machine.MachineName} has not reported for {Thresholds.HeartbeatTimeoutMinutes} minutes",
+                            Message = $"Machine {machine.MachineName} has not reported for {heartbeatTimeoutMinutes} minutes",
                             CurrentValue = machine.LastHeartbeat,
-                            ThresholdValue = Thresholds.HeartbeatTimeoutMinutes,
+                            ThresholdValue = heartbeatTimeoutMinutes,
                             Timestamp = DateTime.UtcNow
                         };
 

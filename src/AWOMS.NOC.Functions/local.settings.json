@@ -7,6 +7,7 @@
     "EmailAlerts_Enabled": "false",
     "EmailAlerts_To": "alerts@yourdomain.com",
     "TeamsAlerts_WebhookUrl": "",
-    "GenericWebhook_Url": ""
+    "GenericWebhook_Url": "",
+    "HeartbeatTimeoutMinutes": "5"
   }
 }

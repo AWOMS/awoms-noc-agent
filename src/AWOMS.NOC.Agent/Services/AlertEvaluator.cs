@@ -5,6 +5,13 @@ namespace AWOMS.NOC.Agent.Services;
 
 public class AlertEvaluator
 {
+    private readonly ThresholdsConfiguration _thresholds;
+
+    public AlertEvaluator(ThresholdsConfiguration thresholds)
+    {
+        _thresholds = thresholds;
+    }
+
     public List<AlertData> EvaluateMetrics(List<MetricData> metrics, string agentId, string machineName)
     {
         var alerts = new List<AlertData>();
@@ -18,17 +25,17 @@ public class AlertEvaluator
                 case "Disk":
                     if (metric.Name.Contains("Free Space") && metric.Value is double freeSpace)
                     {
-                        if (freeSpace < Thresholds.DiskSpaceCriticalPercent)
+                        if (freeSpace < _thresholds.DiskSpaceCriticalPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Critical", metric, 
                                 $"Disk free space critically low: {freeSpace:F2}%", 
-                                Thresholds.DiskSpaceCriticalPercent);
+                                _thresholds.DiskSpaceCriticalPercent);
                         }
-                        else if (freeSpace < Thresholds.DiskSpaceWarningPercent)
+                        else if (freeSpace < _thresholds.DiskSpaceWarningPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Warning", metric, 
                                 $"Disk free space low: {freeSpace:F2}%", 
-                                Thresholds.DiskSpaceWarningPercent);
+                                _thresholds.DiskSpaceWarningPercent);
                         }
                     }
                     break;
@@ -36,17 +43,17 @@ public class AlertEvaluator
                 case "Memory":
                     if (metric.Name == "Memory Usage" && metric.Value is double memUsage)
                     {
-                        if (memUsage > Thresholds.MemoryUsageCriticalPercent)
+                        if (memUsage > _thresholds.MemoryUsageCriticalPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Critical", metric, 
                                 $"Memory usage critically high: {memUsage:F2}%", 
-                                Thresholds.MemoryUsageCriticalPercent);
+                                _thresholds.MemoryUsageCriticalPercent);
                         }
-                        else if (memUsage > Thresholds.MemoryUsageWarningPercent)
+                        else if (memUsage > _thresholds.MemoryUsageWarningPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Warning", metric, 
                                 $"Memory usage high: {memUsage:F2}%", 
-                                Thresholds.MemoryUsageWarningPercent);
+                                _thresholds.MemoryUsageWarningPercent);
                         }
                     }
                     break;
@@ -54,17 +61,17 @@ public class AlertEvaluator
                 case "CPU":
                     if (metric.Name == "CPU Usage" && metric.Value is double cpuUsage)
                     {
-                        if (cpuUsage > Thresholds.CpuUsageCriticalPercent)
+                        if (cpuUsage > _thresholds.CpuUsageCriticalPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Critical", metric, 
                                 $"CPU usage critically high: {cpuUsage:F2}%", 
-                                Thresholds.CpuUsageCriticalPercent);
+                                _thresholds.CpuUsageCriticalPercent);
                         }
-                        else if (cpuUsage > Thresholds.CpuUsageWarningPercent)
+                        else if (cpuUsage > _thresholds.CpuUsageWarningPercent)
                         {
                             alert = CreateAlert(agentId, machineName, "Warning", metric, 
                                 $"CPU usage high: {cpuUsage:F2}%", 
-                                Thresholds.CpuUsageWarningPercent);
+                                _thresholds.CpuUsageWarningPercent);
                         }
                     }
                     break;
@@ -79,7 +86,7 @@ public class AlertEvaluator
                         && updateStatus.Contains("pending", StringComparison.OrdinalIgnoreCase))
                     {
                         alert = CreateAlert(agentId, machineName, "Warning", metric, 
-                            $"Windows updates pending: {updateStatus}", Thresholds.WindowsUpdatePendingDays);
+                            $"Windows updates pending: {updateStatus}", _thresholds.WindowsUpdatePendingDays);
                     }
                     break;
 
