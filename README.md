@@ -82,8 +82,6 @@ Configurable thresholds with multi-channel alert delivery:
 
 ### 1. Deploy Azure Infrastructure
 
-### 1. Deploy Azure Infrastructure
-
 Follow the step-by-step manual deployment guide:
 
 📖 **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md)**
@@ -287,60 +285,6 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 - Ensure service runs with sufficient privileges
 - Some metrics (registry, WMI) require administrator access
 
-## Development Setup
-
-### Building from Source
-
-```powershell
-# Clone repository
-git clone https://github.com/AWOMS/awoms-noc-agent.git
-cd awoms-noc-agent
-
-# Restore and build
-dotnet restore
-dotnet build
-
-# Run agent locally (not as service)
-cd src/AWOMS.NOC.Agent
-dotnet run
-
-# Run Functions locally
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Testing
-
-```powershell
-# Build agent for Windows
-dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj -c Release -r win-x64 --self-contained
-
-# Test Functions locally with Azurite
-# Install Azurite: npm install -g azurite
-azurite --silent --location ./azurite --debug ./azurite/debug.log
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Project Structure
-
-```
-awoms-noc-agent/
-├── .github/workflows/          # CI/CD pipelines
-│   ├── build-agent.yml         # Build and release agent
-│   └── deploy-functions.yml    # Deploy Azure Functions
-├── docs/                       # Documentation
-│   └── AZURE_DEPLOYMENT.md     # Manual Azure deployment guide
-├── scripts/                    # PowerShell scripts
-│   ├── Install-Agent.ps1       # Agent installer
-│   └── Uninstall-Agent.ps1     # Agent uninstaller
-├── src/
-│   ├── AWOMS.NOC.Shared/       # Shared models and constants
-│   ├── AWOMS.NOC.Agent/        # Windows Service agent
-│   └── AWOMS.NOC.Functions/    # Azure Functions
-└── AWOMS.NOC.sln               # Solution file
-```
-
 ## Network Requirements
 
 The agent requires outbound HTTPS (port 443) access to:
@@ -377,6 +321,8 @@ Contributions are welcome! Please:
 2. Create a feature branch
 3. Make your changes with tests
 4. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development environment and testing instructions.
 
 ## License
 
