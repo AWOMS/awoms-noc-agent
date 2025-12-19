@@ -16,6 +16,13 @@ Thanks for helping improve the NOC agent! This guide explains how to propose cha
 
 ## Development Setup
 
+Install Azure Functions Core Tools v4 so `func` commands work locally (requires shell restart after install):
+
+```powershell
+choco install azure-functions-core-tools --pre
+func --version
+```
+
 ```powershell
 # Clone repository
 git clone https://github.com/AWOMS/awoms-noc-agent.git
@@ -36,15 +43,28 @@ func start
 
 ## Local Testing
 
+If `func` stops resolving, rerun `choco upgrade azure-functions-core-tools --pre` and confirm with `func --version` before starting the Functions host.
+
+Install Azurite via npm (Chocolatey does not offer this package) and verify it is available:
+
+```powershell
+npm install -g azurite
+azurite --version
+```
+
 ```powershell
 # Build agent for Windows
 dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj -c Release -r win-x64 --self-contained
 
 # Test Functions locally with Azurite
-# Install Azurite: npm install -g azurite
 azurite --silent --location ./azurite --debug ./azurite/debug.log
 cd src/AWOMS.NOC.Functions
 func start
+
+**Troubleshooting `func start`**
+- Start Azurite first and leave it running; the Functions host connects to http://127.0.0.1 on ports 10000 (tables/blobs) and 10001 (queues).
+- Keep `AzureWebJobsStorage` set to `UseDevelopmentStorage=true` (or the equivalent Azurite connection string) in `local.settings.json` when running locally.
+- If you still see "listener unable to start" errors, confirm the ports are open (e.g., `curl http://127.0.0.1:10000/devstoreaccount1`) and then rerun `func start`.
 ```
 
 ## Project Structure

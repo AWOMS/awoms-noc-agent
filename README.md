@@ -72,6 +72,11 @@ Configurable thresholds with multi-channel alert delivery:
 - Azure CLI installed ([Download](https://aka.ms/azure-cli))
 - .NET 10 SDK ([Download](https://dotnet.microsoft.com/download/dotnet/10.0))
 - PowerShell 7+ (recommended)
+- Azure Functions Core Tools v4 (install with Chocolatey: `choco install azure-functions-core-tools --pre`)
+- Azurite storage emulator for local testing (install via npm: `npm install -g azurite`; Chocolatey does not provide this package)
+
+After installing Core Tools, restart your shell and verify the CLI is on the path with `func --version`.
+Verify Azurite with `azurite --version` after installing via npm.
 
 ### For Agent Installation
 - Windows 10/11 or Windows Server 2016+
@@ -100,6 +105,7 @@ After completing the deployment, you'll have:
 ### 2. Deploy Function App Code
 
 #### Option A: Using Azure Functions Core Tools
+Ensure Azure Functions Core Tools is installed (see prerequisite above) and available via `func --version` before running the publish command.
 ```powershell
 cd src/AWOMS.NOC.Functions
 func azure functionapp publish <your-function-app-name>
@@ -284,6 +290,18 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 **Access denied errors**
 - Ensure service runs with sufficient privileges
 - Some metrics (registry, WMI) require administrator access
+
+### Local Tooling
+
+**`func` command not found**
+- Install Azure Functions Core Tools via Chocolatey: `choco install azure-functions-core-tools --pre`
+- If already installed, run `choco upgrade azure-functions-core-tools --pre` and reopen the shell
+- Confirm the CLI is available with `func --version` before running `func start`
+
+**`azurite` command not found**
+- Install Azurite globally with npm: `npm install -g azurite` (no Chocolatey package is available)
+- If already installed, run `npm update -g azurite` and reopen the shell
+- Confirm the emulator is available with `azurite --version` before starting local storage tests
 
 ## Network Requirements
 
