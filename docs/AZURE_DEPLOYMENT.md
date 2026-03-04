@@ -119,9 +119,12 @@ This guide walks you through creating the Azure resources required for the AWOMS
    | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
    | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
    | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 3 |
+   | `CosmosDbConnectionString` | Cosmos DB connection string for central data storage |
    | `ApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `HeartbeatTimeoutMinutes` | `5` |
    | `EmailAlerts_Enabled` | `false` (or `true` if configuring email) |
+   | `SendGridApiKey` | Your SendGrid API key |
+   | `EmailAlerts_From` | Sender address (e.g., `noc-alerts@yourdomain.com`) |
    | `EmailAlerts_To` | Your email address |
    | `TeamsAlerts_WebhookUrl` | Your Teams webhook URL (if using) |
    | `GenericWebhook_Url` | Your webhook URL (if using) |
@@ -220,8 +223,11 @@ The agent's `appsettings.json` includes configurable thresholds:
     "CpuUsageWarningPercent": 85.0,
     "DiskQueueCritical": 3.0,
     "DiskQueueSustainedMinutes": 15,
-    "HeartbeatTimeoutMinutes": 5,
-    "WindowsUpdatePendingDays": 7
+      "HeartbeatTimeoutMinutes": 5,
+      "WindowsUpdatePendingDays": 7,
+      "PasswordMaxAgeDays": 31,
+      "PingLatencyWarningMs": 200,
+      "CriticalUpdatesPendingDays": 7
   }
 }
 ```
@@ -232,6 +238,8 @@ The agent's `appsettings.json` includes configurable thresholds:
 |---------|---------|---------|
 | `HeartbeatTimeoutMinutes` | Minutes before machine marked offline | 5 |
 | `EmailAlerts_Enabled` | Enable email notifications | false |
+| `SendGridApiKey` | SendGrid API key for email alerts | - |
+| `EmailAlerts_From` | Sender email address | - |
 | `EmailAlerts_To` | Email recipient | - |
 | `TeamsAlerts_WebhookUrl` | Microsoft Teams webhook | - |
 | `GenericWebhook_Url` | Custom webhook endpoint | - |

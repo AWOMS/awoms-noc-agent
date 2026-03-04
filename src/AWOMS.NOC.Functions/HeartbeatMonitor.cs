@@ -1,6 +1,6 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using Azure.Data.Tables;
+using Microsoft.Azure.Cosmos;
 using AWOMS.NOC.Shared.Models;
 using AWOMS.NOC.Shared;
 using System.Text.Json;
@@ -10,12 +10,12 @@ namespace AWOMS.NOC.Functions;
 public class HeartbeatMonitor
 {
     private readonly ILogger<HeartbeatMonitor> _logger;
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly CosmosClient _cosmosClient;
 
-    public HeartbeatMonitor(ILogger<HeartbeatMonitor> logger, TableServiceClient tableServiceClient)
+    public HeartbeatMonitor(ILogger<HeartbeatMonitor> logger, CosmosClient cosmosClient)
     {
         _logger = logger;
-        _tableServiceClient = tableServiceClient;
+        _cosmosClient = cosmosClient;
     }
 
     [Function("HeartbeatMonitor")]
@@ -31,70 +31,45 @@ public class HeartbeatMonitor
             // Get timeout value from configuration (default to 5 minutes)
             var heartbeatTimeoutMinutes = int.TryParse(Environment.GetEnvironmentVariable("HeartbeatTimeoutMinutes"), out var timeout) ? timeout : 5;
 
-            var machineTable = _tableServiceClient.GetTableClient(Constants.MachineTableName);
-            await machineTable.CreateIfNotExistsAsync();
+            var machineContainer = _cosmosClient
+                .GetDatabase(Constants.CosmosDatabaseName)
+                .GetContainer(Constants.MachineContainerName);
 
-            var machines = machineTable.QueryAsync<MachineEntity>(filter: $"PartitionKey eq 'machines'");
+            var machines = machineContainer.GetItemQueryIterator<MachineEntity>(
+                new QueryDefinition("SELECT * FROM c"));
             var timeoutThreshold = DateTime.UtcNow.AddMinutes(-heartbeatTimeoutMinutes);
 
-            await foreach (var machine in machines)
+            while (machines.HasMoreResults)
             {
-                if (machine.LastHeartbeat < timeoutThreshold)
+                var response = await machines.ReadNextAsync();
+                foreach (var machine in response)
                 {
-                    // Machine is offline or hasn't reported
-                    if (machine.IsOnline)
-                    {
-                        // First time detecting offline - send alert
-                        _logger.LogWarning("Machine {MachineName} ({AgentId}) is offline. Last heartbeat: {LastHeartbeat}",
-                            machine.MachineName, machine.AgentId, machine.LastHeartbeat);
+                    var nowUtc = DateTime.UtcNow;
+                    var evaluation = EvaluateMachineHeartbeat(machine, timeoutThreshold, heartbeatTimeoutMinutes, nowUtc);
 
-                        var alert = new AlertData
+                    if (evaluation.Alert is not null)
+                    {
+                        alertMessages.Add(JsonSerializer.Serialize(evaluation.Alert));
+                    }
+
+                    if (evaluation.ShouldUpdate)
+                    {
+                        machine.Id = string.IsNullOrWhiteSpace(machine.Id) ? machine.AgentId : machine.Id;
+                        machine.IsOnline = evaluation.NewIsOnline;
+                        if (evaluation.LastAlertSentUtc is DateTime lastAlertSentUtc)
                         {
-                            AgentId = machine.AgentId,
-                            MachineName = machine.MachineName,
-                            Severity = "Critical",
-                            Category = "Heartbeat",
-                            MetricName = "Heartbeat Timeout",
-                            Message = $"Machine {machine.MachineName} has not reported for {heartbeatTimeoutMinutes} minutes",
-                            CurrentValue = machine.LastHeartbeat,
-                            ThresholdValue = heartbeatTimeoutMinutes,
-                            Timestamp = DateTime.UtcNow
-                        };
+                            machine.LastAlertSent = lastAlertSentUtc;
+                        }
 
-                        alertMessages.Add(JsonSerializer.Serialize(alert));
-
-                        // Update machine status to offline
-                        machine.IsOnline = false;
-                        machine.LastAlertSent = DateTime.UtcNow;
-                        await machineTable.UpdateEntityAsync(machine, machine.ETag);
+                        await machineContainer.ReplaceItemAsync(
+                            machine,
+                            machine.Id,
+                            new PartitionKey(machine.AgentId),
+                            new ItemRequestOptions
+                            {
+                                IfMatchEtag = machine.ETag
+                            });
                     }
-                    else
-                    {
-                        // Already marked as offline, don't send repeated alerts
-                        _logger.LogInformation("Machine {MachineName} is still offline", machine.MachineName);
-                    }
-                }
-                else if (!machine.IsOnline)
-                {
-                    // Machine came back online
-                    _logger.LogInformation("Machine {MachineName} is back online", machine.MachineName);
-                    machine.IsOnline = true;
-                    await machineTable.UpdateEntityAsync(machine, machine.ETag);
-
-                    // Optionally send recovery alert
-                    var recoveryAlert = new AlertData
-                    {
-                        AgentId = machine.AgentId,
-                        MachineName = machine.MachineName,
-                        Severity = "Warning",
-                        Category = "Heartbeat",
-                        MetricName = "Heartbeat Recovered",
-                        Message = $"Machine {machine.MachineName} is back online",
-                        CurrentValue = machine.LastHeartbeat,
-                        Timestamp = DateTime.UtcNow
-                    };
-
-                    alertMessages.Add(JsonSerializer.Serialize(recoveryAlert));
                 }
             }
 
@@ -107,4 +82,59 @@ public class HeartbeatMonitor
 
         return alertMessages;
     }
+
+    internal static HeartbeatEvaluation EvaluateMachineHeartbeat(
+        MachineEntity machine,
+        DateTime timeoutThreshold,
+        int heartbeatTimeoutMinutes,
+        DateTime nowUtc)
+    {
+        if (machine.LastHeartbeat < timeoutThreshold)
+        {
+            if (machine.IsOnline)
+            {
+                return new HeartbeatEvaluation(
+                    ShouldUpdate: true,
+                    NewIsOnline: false,
+                    LastAlertSentUtc: nowUtc,
+                    Alert: new AlertData
+                    {
+                        AgentId = machine.AgentId,
+                        MachineName = machine.MachineName,
+                        Severity = "Critical",
+                        Category = "Heartbeat",
+                        MetricName = "Heartbeat Timeout",
+                        Message = $"Machine {machine.MachineName} has not reported for {heartbeatTimeoutMinutes} minutes",
+                        CurrentValue = machine.LastHeartbeat,
+                        ThresholdValue = heartbeatTimeoutMinutes,
+                        Timestamp = nowUtc
+                    });
+            }
+
+            return new HeartbeatEvaluation(ShouldUpdate: false, NewIsOnline: machine.IsOnline, LastAlertSentUtc: null, Alert: null);
+        }
+
+        if (!machine.IsOnline)
+        {
+            return new HeartbeatEvaluation(
+                ShouldUpdate: true,
+                NewIsOnline: true,
+                LastAlertSentUtc: null,
+                Alert: new AlertData
+                {
+                    AgentId = machine.AgentId,
+                    MachineName = machine.MachineName,
+                    Severity = "Warning",
+                    Category = "Heartbeat",
+                    MetricName = "Heartbeat Recovered",
+                    Message = $"Machine {machine.MachineName} is back online",
+                    CurrentValue = machine.LastHeartbeat,
+                    Timestamp = nowUtc
+                });
+        }
+
+        return new HeartbeatEvaluation(ShouldUpdate: false, NewIsOnline: machine.IsOnline, LastAlertSentUtc: null, Alert: null);
+    }
 }
+
+internal sealed record HeartbeatEvaluation(bool ShouldUpdate, bool NewIsOnline, DateTime? LastAlertSentUtc, AlertData? Alert);

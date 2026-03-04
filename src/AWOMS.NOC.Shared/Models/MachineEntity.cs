@@ -1,14 +1,14 @@
-using Azure;
-using Azure.Data.Tables;
+using System.Text.Json.Serialization;
 
 namespace AWOMS.NOC.Shared.Models;
 
-public class MachineEntity : ITableEntity
+public class MachineEntity
 {
-    public string PartitionKey { get; set; } = "machines";
-    public string RowKey { get; set; } = string.Empty; // AgentId
-    public DateTimeOffset? Timestamp { get; set; }
-    public ETag ETag { get; set; }
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("_etag")]
+    public string? ETag { get; set; }
     
     // Machine Information
     public string AgentId { get; set; } = string.Empty;

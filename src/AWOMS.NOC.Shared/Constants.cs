@@ -2,9 +2,11 @@ namespace AWOMS.NOC.Shared;
 
 public static class Constants
 {
-    // Table Storage Names
-    public const string MachineTableName = "machines";
-    public const string TelemetryTableName = "telemetry";
+    // Cosmos DB
+    public const string CosmosDatabaseName = "awomsnoc";
+    public const string MachineContainerName = "machines";
+    public const string TelemetryContainerName = "telemetry";
+    public const string AgentPartitionKeyPath = "/agentId";
     
     // Queue Storage Names
     public const string AlertsQueueName = "alerts";

@@ -1,23 +1,24 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
-using Azure.Data.Tables;
+using Microsoft.Azure.Cosmos;
 using AWOMS.NOC.Shared.Models;
 using AWOMS.NOC.Shared;
 using System.Text.Json;
 using System.Net;
+using System.Text;
 
 namespace AWOMS.NOC.Functions;
 
 public class TelemetryIngestion
 {
     private readonly ILogger<TelemetryIngestion> _logger;
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly CosmosClient _cosmosClient;
 
-    public TelemetryIngestion(ILogger<TelemetryIngestion> logger, TableServiceClient tableServiceClient)
+    public TelemetryIngestion(ILogger<TelemetryIngestion> logger, CosmosClient cosmosClient)
     {
         _logger = logger;
-        _tableServiceClient = tableServiceClient;
+        _cosmosClient = cosmosClient;
     }
 
     [Function("TelemetryIngestion")]
@@ -101,13 +102,11 @@ public class TelemetryIngestion
     {
         try
         {
-            var machineTable = _tableServiceClient.GetTableClient(Constants.MachineTableName);
-            await machineTable.CreateIfNotExistsAsync();
+            var machineContainer = GetMachineContainer();
 
             var machineEntity = new MachineEntity
             {
-                PartitionKey = "machines",
-                RowKey = payload.AgentId,
+                Id = payload.AgentId,
                 AgentId = payload.AgentId,
                 MachineName = payload.MachineName,
                 DomainName = payload.DomainName,
@@ -117,7 +116,7 @@ public class TelemetryIngestion
                 IsOnline = true
             };
 
-            await machineTable.UpsertEntityAsync(machineEntity);
+            await machineContainer.UpsertItemAsync(machineEntity, new PartitionKey(machineEntity.AgentId));
             _logger.LogInformation("Updated machine entity for {AgentId}", payload.AgentId);
         }
         catch (Exception ex)
@@ -130,29 +129,31 @@ public class TelemetryIngestion
     {
         try
         {
-            var telemetryTable = _tableServiceClient.GetTableClient(Constants.TelemetryTableName);
-            await telemetryTable.CreateIfNotExistsAsync();
+            var telemetryContainer = GetTelemetryContainer();
 
             foreach (var metric in payload.Metrics)
             {
                 // Use inverted ticks for descending order (most recent first)
                 var invertedTicks = DateTime.MaxValue.Ticks - metric.Timestamp.Ticks;
                 var rowKey = $"{invertedTicks:D19}_{metric.Category}_{metric.Name}";
+                var encodedKey = Convert.ToBase64String(Encoding.UTF8.GetBytes(rowKey))
+                    .TrimEnd('=')
+                    .Replace('+', '-')
+                    .Replace('/', '_');
 
                 var telemetryEntity = new TelemetryEntity
                 {
-                    PartitionKey = payload.AgentId,
-                    RowKey = rowKey,
+                    Id = $"{payload.AgentId}_{encodedKey}",
                     AgentId = payload.AgentId,
                     MachineName = payload.MachineName,
                     Category = metric.Category,
                     MetricName = metric.Name,
-                    MetricValue = JsonSerializer.Serialize(metric.Value),
+                    MetricValue = metric.Value,
                     Unit = metric.Unit,
                     MetricTimestamp = metric.Timestamp
                 };
 
-                await telemetryTable.AddEntityAsync(telemetryEntity);
+                await telemetryContainer.CreateItemAsync(telemetryEntity, new PartitionKey(telemetryEntity.AgentId));
             }
 
             _logger.LogInformation("Stored {Count} metrics for {AgentId}", payload.Metrics.Count, payload.AgentId);
@@ -161,6 +162,20 @@ public class TelemetryIngestion
         {
             _logger.LogError(ex, "Error storing telemetry metrics");
         }
+    }
+
+    private Container GetMachineContainer()
+    {
+        return _cosmosClient
+            .GetDatabase(Constants.CosmosDatabaseName)
+            .GetContainer(Constants.MachineContainerName);
+    }
+
+    private Container GetTelemetryContainer()
+    {
+        return _cosmosClient
+            .GetDatabase(Constants.CosmosDatabaseName)
+            .GetContainer(Constants.TelemetryContainerName);
     }
 }
 

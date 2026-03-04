@@ -44,8 +44,10 @@ A comprehensive Network Operations Center (NOC) monitoring solution for Windows 
 - **Disk**: Free space percentage, disk queue length, total size
 - **Memory**: Usage percentage, available/total memory
 - **CPU**: Processor utilization percentage
-- **Network**: Interface status, bytes sent/received per second
-- **System**: Last boot time, uptime, pending reboot detection, Windows Update status
+- **Network**: Interface status, bytes sent/received per second, public IP detection, ping target connectivity/latency
+- **System**: Last boot time, uptime, pending reboot detection
+- **Windows Update**: Available updates, critical/important update count, last update install time, update age
+- **Active Directory**: Domain user password age threshold monitoring
 - **Security**: Antivirus and firewall status
 - **Services**: Critical Windows services monitoring (DNS, Print Spooler, etc.)
 - **Event Log**: Critical system and application event monitoring
@@ -62,7 +64,7 @@ Configurable thresholds with multi-channel alert delivery:
 - Cost-effective Azure consumption-based pricing (< $5/month expected)
 - Secure API key authentication stored in Azure Key Vault
 - Resilient with automatic retry logic and exponential backoff
-- Table Storage for telemetry data (efficient querying)
+- Cosmos DB (NoSQL API) for telemetry and machine state data
 - Queue Storage for reliable alert delivery
 
 ## Prerequisites
@@ -136,7 +138,10 @@ Edit `appsettings.json` to customize agent behavior:
     "ApiKey": "your-api-key-here",
     "CollectionIntervalSeconds": 60,
     "ReportingIntervalSeconds": 300,
-    "EnableLocalAlerts": true
+    "EnableLocalAlerts": true,
+    "PublicIpUrl": "https://api.ipify.org/",
+    "PingTargets": ["8.8.8.8", "1.1.1.1"],
+    "MonitoredServices": ["Dnscache", "LanmanServer", "LanmanWorkstation", "Spooler", "W32Time", "WinDefend"]
   }
 }
 ```
@@ -148,6 +153,9 @@ Edit `appsettings.json` to customize agent behavior:
 | `CollectionIntervalSeconds` | How often to collect metrics | 60 |
 | `ReportingIntervalSeconds` | How often to send telemetry | 300 |
 | `EnableLocalAlerts` | Evaluate alerts locally for immediate critical alerts | true |
+| `PublicIpUrl` | URL used to resolve external IP | https://api.ipify.org/ |
+| `PingTargets` | Targets used for connectivity/latency checks | 8.8.8.8, 1.1.1.1 |
+| `MonitoredServices` | Windows service names monitored for stopped state | DNS/Spooler/etc |
 
 ### Alert Thresholds
 
@@ -165,7 +173,10 @@ Thresholds are configured in the agent's `appsettings.json` file and can be cust
     "DiskQueueCritical": 3.0,
     "DiskQueueSustainedMinutes": 15,
     "HeartbeatTimeoutMinutes": 5,
-    "WindowsUpdatePendingDays": 7
+    "WindowsUpdatePendingDays": 7,
+    "PasswordMaxAgeDays": 31,
+    "PingLatencyWarningMs": 200,
+    "CriticalUpdatesPendingDays": 7
   }
 }
 ```
@@ -179,7 +190,10 @@ Default threshold values:
 | CPU Usage | > 85% | > 95% | Sustained for 10 min |
 | Disk Queue Length | N/A | > 3 | Sustained for 15 min |
 | Heartbeat Timeout | N/A | > 5 minutes | Machine offline |
-| Windows Updates | N/A | > 7 days | Since last update |
+| Windows Updates | Available critical/important updates | > 7 days | Since last successful update |
+| AD Password Age | > 31 days | N/A | Per domain user |
+| Ping Latency | > 200ms | N/A | Per configured target |
+| Ping Status | N/A | Not Success | Per configured target |
 | Antivirus Status | Outdated | Disabled | Security risk |
 | Critical Services | N/A | Stopped | Service failure |
 
@@ -190,6 +204,7 @@ To customize thresholds, edit the agent's `appsettings.json` before installation
 Configure alert channels in Azure Function App settings (see the [Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md) for details):
 
 - **Email Alerts**: Set `EmailAlerts_Enabled=true` and `EmailAlerts_To`
+- **Email Alerts**: Set `EmailAlerts_Enabled=true`, `EmailAlerts_From`, `EmailAlerts_To`, and `SendGridApiKey`
 - **Teams Alerts**: Set `TeamsAlerts_WebhookUrl` with your webhook URL
 - **Generic Webhook**: Set `GenericWebhook_Url` for custom integrations
 - **Heartbeat Timeout**: Set `HeartbeatTimeoutMinutes` (default: 5)
@@ -198,15 +213,15 @@ Configure alert channels in Azure Function App settings (see the [Azure Deployme
 
 ### View Telemetry Data
 
-Query Azure Table Storage using Storage Explorer or Azure Portal:
+Query Azure Cosmos DB using Data Explorer or Azure Portal:
 
-**Machines Table**: Current status of all monitored machines
-- Partition Key: `machines`
-- Row Key: `AgentId` (base64-encoded domain\machine)
+**Machines Container**: Current status of all monitored machines
+- Partition Key: `/agentId`
+- Document id: `AgentId`
 
-**Telemetry Table**: Historical metrics
-- Partition Key: `AgentId`
-- Row Key: `InvertedTicks_Category_MetricName` (sorted newest first)
+**Telemetry Container**: Historical metrics
+- Partition Key: `/agentId`
+- Document id: `{AgentId}_{EncodedMetricKey}`
 
 ### Application Insights
 
@@ -221,8 +236,9 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 **Email**: Configure SMTP or SendGrid
 ```json
 "EmailAlerts_Enabled": "true",
+"EmailAlerts_From": "noc-alerts@yourdomain.com",
 "EmailAlerts_To": "alerts@yourdomain.com",
-"SendGrid_ApiKey": "your-sendgrid-key"
+"SendGridApiKey": "your-sendgrid-key"
 ```
 
 **Microsoft Teams**: Create an incoming webhook

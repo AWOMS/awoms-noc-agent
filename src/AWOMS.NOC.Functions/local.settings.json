@@ -2,9 +2,12 @@
   "IsEncrypted": false,
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "CosmosDbConnectionString": "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5\/R+ob0N8A7Cgv30VRDj5JdQwW8Qe1u5x4A=;",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
     "ApiKey": "dev-api-key-change-in-production",
     "EmailAlerts_Enabled": "false",
+    "SendGridApiKey": "",
+    "EmailAlerts_From": "noc-alerts@yourdomain.com",
     "EmailAlerts_To": "alerts@yourdomain.com",
     "TeamsAlerts_WebhookUrl": "",
     "GenericWebhook_Url": "",

@@ -2,8 +2,21 @@ using AWOMS.NOC.Agent;
 using AWOMS.NOC.Agent.Collectors;
 using AWOMS.NOC.Agent.Services;
 using Polly;
+using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .WriteTo.Console()
+    .WriteTo.File(
+        path: @"C:\AWOMS\Logs\AWOMS.NOC.Agent\agent-.log",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        shared: true)
+    .CreateLogger();
+
+builder.Services.AddSerilog();
 
 // Add Windows Service support
 builder.Services.AddWindowsService(options =>
@@ -30,6 +43,10 @@ builder.Services.AddSingleton<IMetricCollector, SystemMetricCollector>();
 builder.Services.AddSingleton<IMetricCollector, SecurityMetricCollector>();
 builder.Services.AddSingleton<IMetricCollector, ServiceMetricCollector>();
 builder.Services.AddSingleton<IMetricCollector, EventLogMetricCollector>();
+builder.Services.AddSingleton<IMetricCollector, ActiveDirectoryMetricCollector>();
+builder.Services.AddSingleton<IMetricCollector, WindowsUpdateMetricCollector>();
+builder.Services.AddSingleton<IMetricCollector, NetworkConnectivityMetricCollector>();
+builder.Services.AddSingleton<IMetricCollector, PublicIpMetricCollector>();
 
 // Register services
 builder.Services.AddSingleton<AlertEvaluator>();

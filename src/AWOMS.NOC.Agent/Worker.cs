@@ -40,13 +40,25 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("AWOMS NOC Agent started. AgentId: {AgentId}", _agentId);
 
-        var collectionTimer = new PeriodicTimer(TimeSpan.FromSeconds(_configuration.CollectionIntervalSeconds));
-        var reportingTimer = new PeriodicTimer(TimeSpan.FromSeconds(_configuration.ReportingIntervalSeconds));
-        
-        var collectionTask = CollectMetricsLoop(collectionTimer, stoppingToken);
-        var reportingTask = ReportMetricsLoop(reportingTimer, stoppingToken);
+        try
+        {
+            var collectionTimer = new PeriodicTimer(TimeSpan.FromSeconds(_configuration.CollectionIntervalSeconds));
+            var reportingTimer = new PeriodicTimer(TimeSpan.FromSeconds(_configuration.ReportingIntervalSeconds));
 
-        await Task.WhenAll(collectionTask, reportingTask);
+            var collectionTask = CollectMetricsLoop(collectionTimer, stoppingToken);
+            var reportingTask = ReportMetricsLoop(reportingTimer, stoppingToken);
+
+            await Task.WhenAll(collectionTask, reportingTask);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("AWOMS NOC Agent stopping");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Fatal error in worker execution. Exiting process for service recovery.");
+            Environment.Exit(1);
+        }
     }
 
     private async Task CollectMetricsLoop(PeriodicTimer timer, CancellationToken stoppingToken)
@@ -166,7 +178,7 @@ public class Worker : BackgroundService
         }
     }
 
-    private string GenerateAgentId(string machineName, string domainName)
+    internal static string GenerateAgentId(string machineName, string domainName)
     {
         // Generate a stable agent ID based on machine name and domain
         var combined = $"{domainName}\\{machineName}".ToLowerInvariant();

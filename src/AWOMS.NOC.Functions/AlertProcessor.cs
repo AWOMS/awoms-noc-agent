@@ -4,6 +4,8 @@ using AWOMS.NOC.Shared.Models;
 using System.Text.Json;
 using System.Net.Http;
 using System.Text;
+using SendGrid;
+using SendGrid.Helpers.Mail;
 
 namespace AWOMS.NOC.Functions;
 
@@ -51,32 +53,52 @@ public class AlertProcessor
     {
         try
         {
-            var smtpEnabled = Environment.GetEnvironmentVariable("EmailAlerts_Enabled");
-            if (smtpEnabled != "true")
+            var emailEnabled = Environment.GetEnvironmentVariable("EmailAlerts_Enabled");
+            if (!string.Equals(emailEnabled, "true", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogDebug("Email alerts not enabled");
                 return;
             }
 
+            var sendGridApiKey = Environment.GetEnvironmentVariable("SendGridApiKey");
+            var emailFrom = Environment.GetEnvironmentVariable("EmailAlerts_From");
             var emailTo = Environment.GetEnvironmentVariable("EmailAlerts_To");
-            if (string.IsNullOrEmpty(emailTo))
+
+            if (string.IsNullOrWhiteSpace(sendGridApiKey) || string.IsNullOrWhiteSpace(emailFrom) || string.IsNullOrWhiteSpace(emailTo))
             {
-                _logger.LogWarning("Email alerts enabled but no recipient configured");
+                _logger.LogWarning("Email alerts enabled but SendGridApiKey, EmailAlerts_From, or EmailAlerts_To is missing");
                 return;
             }
 
-            // In production, you would integrate with SendGrid or SMTP here
-            _logger.LogInformation("Would send email alert to {EmailTo}: {Message}", emailTo, alert.Message);
-            
-            // Example SendGrid integration (requires SendGrid NuGet package):
-            // var apiKey = Environment.GetEnvironmentVariable("SendGrid_ApiKey");
-            // var client = new SendGridClient(apiKey);
-            // var from = new EmailAddress("noc-alerts@yourdomain.com", "AWOMS NOC");
-            // var to = new EmailAddress(emailTo);
-            // var subject = $"[{alert.Severity}] {alert.Category} Alert: {alert.MachineName}";
-            // var plainTextContent = alert.Message;
-            // var msg = MailHelper.CreateSingleEmail(from, to, subject, plainTextContent, null);
-            // await client.SendEmailAsync(msg);
+            var recipients = emailTo
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!recipients.Any())
+            {
+                _logger.LogWarning("EmailAlerts_To has no valid recipients");
+                return;
+            }
+
+            var subject = $"[{alert.Severity}] {alert.Category} Alert: {alert.MachineName}";
+            var plainTextContent = $"Machine: {alert.MachineName}\nCategory: {alert.Category}\nMetric: {alert.MetricName}\nSeverity: {alert.Severity}\nMessage: {alert.Message}\nTime (UTC): {alert.Timestamp:yyyy-MM-dd HH:mm:ss}";
+            var htmlContent = $"<h3>[{alert.Severity}] {alert.Category} Alert</h3><p><b>Machine:</b> {alert.MachineName}</p><p><b>Metric:</b> {alert.MetricName}</p><p><b>Message:</b> {alert.Message}</p><p><b>Time (UTC):</b> {alert.Timestamp:yyyy-MM-dd HH:mm:ss}</p>";
+
+            var client = new SendGridClient(sendGridApiKey);
+            var from = new EmailAddress(emailFrom, "AWOMS NOC");
+            var tos = recipients.Select(r => new EmailAddress(r)).ToList();
+            var message = MailHelper.CreateSingleEmailToMultipleRecipients(from, tos, subject, plainTextContent, htmlContent, false);
+            var response = await client.SendEmailAsync(message);
+
+            if ((int)response.StatusCode is >= 200 and < 300)
+            {
+                _logger.LogInformation("Email alert sent to {RecipientCount} recipient(s)", recipients.Count);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to send email alert. Status: {StatusCode}", response.StatusCode);
+            }
         }
         catch (Exception ex)
         {
