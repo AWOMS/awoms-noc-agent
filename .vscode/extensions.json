@@ -2,6 +2,7 @@
   "recommendations": [
     "ms-azuretools.vscode-azurefunctions",
     "ms-dotnettools.csharp",
-    "github.vscode-github-actions"
+    "github.vscode-github-actions",
+    "azurite.azurite"
   ]
 }
