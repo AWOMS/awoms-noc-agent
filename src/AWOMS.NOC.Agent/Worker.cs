@@ -63,8 +63,20 @@ public class Worker : BackgroundService
 
     private async Task CollectMetricsLoop(PeriodicTimer timer, CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var waitSeconds = _configuration.CollectionIntervalSeconds;
+            var nextExecutionUtc = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
+            _logger.LogInformation(
+                "Next metric collection at {NextExecutionUtc} UTC (in {WaitSeconds} seconds)",
+                nextExecutionUtc,
+                waitSeconds);
+
+            if (!await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                break;
+            }
+
             try
             {
                 var metrics = new List<MetricData>();
@@ -75,6 +87,22 @@ public class Worker : BackgroundService
                     {
                         var collectorMetrics = await collector.CollectAsync();
                         metrics.AddRange(collectorMetrics);
+
+_logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetrics.Count, collector.GetType().Name);
+                        if (_logger.IsEnabled(LogLevel.Debug))
+                        {
+                            foreach (var metric in collectorMetrics)
+                            {
+                                _logger.LogDebug(
+                                    "Collected metric from {CollectorType}: {Category}.{Name}={Value} {Unit} at {Timestamp:O}",
+                                    collector.GetType().Name,
+                                    metric.Category,
+                                    metric.Name,
+                                    metric.Value,
+                                    metric.Unit,
+                                    metric.Timestamp);
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -112,8 +140,20 @@ public class Worker : BackgroundService
 
     private async Task ReportMetricsLoop(PeriodicTimer timer, CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var waitSeconds = _configuration.ReportingIntervalSeconds;
+            var nextExecutionUtc = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
+            _logger.LogInformation(
+                "Next telemetry report at {NextExecutionUtc} UTC (in {WaitSeconds} seconds)",
+                nextExecutionUtc,
+                waitSeconds);
+
+            if (!await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                break;
+            }
+
             try
             {
                 List<MetricData> metricsToSend;

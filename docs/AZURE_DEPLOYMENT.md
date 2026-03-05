@@ -5,7 +5,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
 ## Prerequisites
 
 - Azure subscription with appropriate permissions to create resources
-- Estimated cost: < $5/month for 50 machines
+- Estimated cost: < $1/month for 15 machines (Azure Table Storage)
 
 ## Step 1: Create a Resource Group
 
@@ -43,22 +43,17 @@ This guide walks you through creating the Azure resources required for the AWOMS
 2. Click **Show keys**
 3. Copy the **Connection string** from key1 (you'll need this later)
 
-## Step 3: Create a Cosmos DB Account (NoSQL API)
+## Step 3: Create Tables in the Storage Account
 
-1. In your resource group, click **+ Create**
-2. Search for "Azure Cosmos DB" and select it
-3. Choose **Azure Cosmos DB for NoSQL**
-4. Fill in the details:
-   - **Account name**: Enter a globally unique name (e.g., `awomsnoc-cosmos`)
-   - **Region**: Same as your resource group
-   - **Capacity mode**: Serverless (recommended for small workloads)
-5. Click **Review + create**, then **Create**
-6. After deployment, open the Cosmos DB account
-7. Navigate to **Data Explorer** and create:
-   - **Database**: `awomsnoc`
-   - **Container**: `machines` with partition key `/agentId`
-   - **Container**: `telemetry` with partition key `/agentId`
-8. Navigate to **Keys** and copy the **Primary Connection String** (for `CosmosDbConnectionString`)
+Table Storage uses the same Storage Account created in Step 2 — no separate resource needed.
+
+1. In the storage account, navigate to **Data storage** → **Tables**
+2. Click **+ Table** and create three tables:
+   - Table name: `machines`
+   - Table name: `machinemetrics`
+   - Table name: `metrichistory`
+
+> **Note:** The Function App will also create these tables automatically on first startup if they do not exist.
 
 ## Step 4: Create Application Insights
 
@@ -128,7 +123,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
    | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
    | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
    | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 4 |
-   | `CosmosDbConnectionString` | Cosmos DB connection string for central data storage |
+   | `TableStorageConnectionString` | Connection string from Step 2 (same Storage Account) |
    | `ApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `HeartbeatTimeoutMinutes` | `5` |
    | `EmailAlerts_Enabled` | `false` (or `true` if configuring email) |
@@ -192,10 +187,11 @@ Use the Azure Functions extension to publish directly from your IDE.
 
 1. In the Azure Portal, go to your Function App
 2. Navigate to **Functions**
-3. You should see three functions:
+3. You should see four functions:
    - `TelemetryIngestion`
    - `HeartbeatMonitor`
    - `AlertProcessor`
+   - `MetricHistoryCleanup` (runs daily at 02:00 UTC, deletes history older than 1 year)
 4. Click on `TelemetryIngestion` and note the **Function URL** (you'll need this for agent configuration)
 5. Get the API key:
    - Go to your Key Vault
@@ -245,6 +241,7 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 | Setting | Purpose | Default |
 |---------|---------|---------|
+| `TableStorageConnectionString` | Azure Storage Account connection string | Required |
 | `HeartbeatTimeoutMinutes` | Minutes before machine marked offline | 5 |
 | `EmailAlerts_Enabled` | Enable email notifications | false |
 | `SendGridApiKey` | SendGrid API key for email alerts | - |
@@ -257,10 +254,12 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 ### View Telemetry Data
 
-1. Go to your Cosmos DB account
-2. Navigate to **Data Explorer**
-3. Open database `awomsnoc`
-4. Query `machines` or `telemetry` containers
+1. Go to your Storage Account
+2. Navigate to **Data storage** → **Tables**
+3. Open one of the three tables:
+   - `machines` — one row per workstation, current heartbeat and online status
+   - `machinemetrics` — one row per metric per workstation, current snapshot of all latest values
+   - `metrichistory` — time-series history for trending metrics (disk space, CPU, memory, etc.), retained for 1 year
 
 ### Monitor Function Performance
 

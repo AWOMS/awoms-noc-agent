@@ -1,6 +1,6 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using Microsoft.Azure.Cosmos;
+using Azure.Data.Tables;
 using AWOMS.NOC.Shared.Models;
 using AWOMS.NOC.Shared;
 using System.Text.Json;
@@ -10,12 +10,12 @@ namespace AWOMS.NOC.Functions;
 public class HeartbeatMonitor
 {
     private readonly ILogger<HeartbeatMonitor> _logger;
-    private readonly CosmosClient _cosmosClient;
+    private readonly TableServiceClient _tableServiceClient;
 
-    public HeartbeatMonitor(ILogger<HeartbeatMonitor> logger, CosmosClient cosmosClient)
+    public HeartbeatMonitor(ILogger<HeartbeatMonitor> logger, TableServiceClient tableServiceClient)
     {
         _logger = logger;
-        _cosmosClient = cosmosClient;
+        _tableServiceClient = tableServiceClient;
     }
 
     [Function("HeartbeatMonitor")]
@@ -31,45 +31,28 @@ public class HeartbeatMonitor
             // Get timeout value from configuration (default to 5 minutes)
             var heartbeatTimeoutMinutes = int.TryParse(Environment.GetEnvironmentVariable("HeartbeatTimeoutMinutes"), out var timeout) ? timeout : 5;
 
-            var machineContainer = _cosmosClient
-                .GetDatabase(Constants.CosmosDatabaseName)
-                .GetContainer(Constants.MachineContainerName);
-
-            var machines = machineContainer.GetItemQueryIterator<MachineEntity>(
-                new QueryDefinition("SELECT * FROM c"));
+            var machineTable = _tableServiceClient.GetTableClient(Constants.MachinesTableName);
             var timeoutThreshold = DateTime.UtcNow.AddMinutes(-heartbeatTimeoutMinutes);
 
-            while (machines.HasMoreResults)
+            await foreach (var machine in machineTable.QueryAsync<TableMachineEntity>(entity => entity.PartitionKey == "machines"))
             {
-                var response = await machines.ReadNextAsync();
-                foreach (var machine in response)
+                var nowUtc = DateTime.UtcNow;
+                var evaluation = EvaluateMachineHeartbeat(machine, timeoutThreshold, heartbeatTimeoutMinutes, nowUtc);
+
+                if (evaluation.Alert is not null)
                 {
-                    var nowUtc = DateTime.UtcNow;
-                    var evaluation = EvaluateMachineHeartbeat(machine, timeoutThreshold, heartbeatTimeoutMinutes, nowUtc);
+                    alertMessages.Add(JsonSerializer.Serialize(evaluation.Alert));
+                }
 
-                    if (evaluation.Alert is not null)
+                if (evaluation.ShouldUpdate)
+                {
+                    machine.IsOnline = evaluation.NewIsOnline;
+                    if (evaluation.LastAlertSentUtc is DateTime lastAlertSentUtc)
                     {
-                        alertMessages.Add(JsonSerializer.Serialize(evaluation.Alert));
+                        machine.LastAlertSent = lastAlertSentUtc;
                     }
 
-                    if (evaluation.ShouldUpdate)
-                    {
-                        machine.Id = string.IsNullOrWhiteSpace(machine.Id) ? machine.AgentId : machine.Id;
-                        machine.IsOnline = evaluation.NewIsOnline;
-                        if (evaluation.LastAlertSentUtc is DateTime lastAlertSentUtc)
-                        {
-                            machine.LastAlertSent = lastAlertSentUtc;
-                        }
-
-                        await machineContainer.ReplaceItemAsync(
-                            machine,
-                            machine.Id,
-                            new PartitionKey(machine.AgentId),
-                            new ItemRequestOptions
-                            {
-                                IfMatchEtag = machine.ETag
-                            });
-                    }
+                    await machineTable.UpdateEntityAsync(machine, machine.ETag, TableUpdateMode.Replace);
                 }
             }
 
@@ -84,7 +67,7 @@ public class HeartbeatMonitor
     }
 
     internal static HeartbeatEvaluation EvaluateMachineHeartbeat(
-        MachineEntity machine,
+        TableMachineEntity machine,
         DateTime timeoutThreshold,
         int heartbeatTimeoutMinutes,
         DateTime nowUtc)

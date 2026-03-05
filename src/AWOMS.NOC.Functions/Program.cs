@@ -1,7 +1,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Azure.Cosmos;
+using Azure.Data.Tables;
 using Microsoft.Extensions.Configuration;
 using AWOMS.NOC.Shared;
 
@@ -12,25 +12,28 @@ var host = new HostBuilder()
         services.AddApplicationInsightsTelemetryWorkerService();
         services.ConfigureFunctionsApplicationInsights();
 
-        // Register Azure Cosmos DB client
-        var cosmosConnectionString = context.Configuration["CosmosDbConnectionString"];
-        if (!string.IsNullOrWhiteSpace(cosmosConnectionString))
+        // Register Azure Table Storage client
+        var tableStorageConnectionString =
+            context.Configuration["TableStorageConnectionString"] ??
+            context.Configuration["AzureWebJobsStorage"];
+
+        if (!string.IsNullOrWhiteSpace(tableStorageConnectionString))
         {
-            var cosmosClient = new CosmosClient(cosmosConnectionString);
-            var database = cosmosClient.CreateDatabaseIfNotExistsAsync(Constants.CosmosDatabaseName)
-                .GetAwaiter()
-                .GetResult()
-                .Database;
+            var tableServiceClient = new TableServiceClient(tableStorageConnectionString);
 
-            database.CreateContainerIfNotExistsAsync(Constants.MachineContainerName, Constants.AgentPartitionKeyPath)
+            tableServiceClient.CreateTableIfNotExistsAsync(Constants.MachinesTableName)
                 .GetAwaiter()
                 .GetResult();
 
-            database.CreateContainerIfNotExistsAsync(Constants.TelemetryContainerName, Constants.AgentPartitionKeyPath)
+            tableServiceClient.CreateTableIfNotExistsAsync(Constants.MetricSnapshotTableName)
                 .GetAwaiter()
                 .GetResult();
 
-            services.AddSingleton(cosmosClient);
+            tableServiceClient.CreateTableIfNotExistsAsync(Constants.MetricHistoryTableName)
+                .GetAwaiter()
+                .GetResult();
+
+            services.AddSingleton(tableServiceClient);
         }
 
         // Register HttpClient for AlertProcessor

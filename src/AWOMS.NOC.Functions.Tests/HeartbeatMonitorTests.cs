@@ -9,9 +9,11 @@ public class HeartbeatMonitorTests
     public void EvaluateMachineHeartbeat_OnlineAndTimedOut_ShouldCreateCriticalAlertAndMarkOffline()
     {
         var now = DateTime.UtcNow;
-        var machine = new MachineEntity
+        var machine = new TableMachineEntity
         {
             AgentId = "a1",
+            PartitionKey = "machines",
+            RowKey = "a1",
             MachineName = "m1",
             LastHeartbeat = now.AddMinutes(-10),
             IsOnline = true
@@ -35,9 +37,11 @@ public class HeartbeatMonitorTests
     public void EvaluateMachineHeartbeat_OfflineAndRecovered_ShouldCreateWarningAlertAndMarkOnline()
     {
         var now = DateTime.UtcNow;
-        var machine = new MachineEntity
+        var machine = new TableMachineEntity
         {
             AgentId = "a1",
+            PartitionKey = "machines",
+            RowKey = "a1",
             MachineName = "m1",
             LastHeartbeat = now.AddMinutes(-1),
             IsOnline = false
@@ -60,9 +64,11 @@ public class HeartbeatMonitorTests
     public void EvaluateMachineHeartbeat_OfflineAndStillTimedOut_ShouldTakeNoAction()
     {
         var now = DateTime.UtcNow;
-        var machine = new MachineEntity
+        var machine = new TableMachineEntity
         {
             AgentId = "a1",
+            PartitionKey = "machines",
+            RowKey = "a1",
             MachineName = "m1",
             LastHeartbeat = now.AddMinutes(-10),
             IsOnline = false

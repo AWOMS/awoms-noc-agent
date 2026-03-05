@@ -1,24 +1,44 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.Azure.Cosmos;
+using Azure.Data.Tables;
+using Azure;
 using AWOMS.NOC.Shared.Models;
 using AWOMS.NOC.Shared;
 using System.Text.Json;
 using System.Net;
-using System.Text;
+using System.Globalization;
 
 namespace AWOMS.NOC.Functions;
 
 public class TelemetryIngestion
 {
     private readonly ILogger<TelemetryIngestion> _logger;
-    private readonly CosmosClient _cosmosClient;
+    private readonly TableServiceClient _tableServiceClient;
 
-    public TelemetryIngestion(ILogger<TelemetryIngestion> logger, CosmosClient cosmosClient)
+    private static readonly string[] TrendingMetricPrefixes =
+    [
+        "CPU|CPU Usage",
+        "Memory|Memory Usage",
+        "Memory|Available Memory",
+        "Disk|Free Space (",
+        "Disk|Used Space (",
+        "Network|Interface Status",
+        "NetworkConnectivity|Ping Status",
+        "NetworkConnectivity|Ping Latency",
+        "System|Uptime",
+        "System|Pending Reboot",
+        "EventLog|Error Count",
+        "EventLog|Warning Count",
+        "WindowsUpdate|Available Updates",
+        "WindowsUpdate|Critical Updates Available",
+        "ActiveDirectory|Users With Expired Passwords"
+    ];
+
+    public TelemetryIngestion(ILogger<TelemetryIngestion> logger, TableServiceClient tableServiceClient)
     {
         _logger = logger;
-        _cosmosClient = cosmosClient;
+        _tableServiceClient = tableServiceClient;
     }
 
     [Function("TelemetryIngestion")]
@@ -71,7 +91,7 @@ public class TelemetryIngestion
             // Update or create machine entity
             await UpdateMachineEntity(payload);
 
-            // Store metrics in telemetry table
+            // Store current snapshot and historical trends
             await StoreTelemetryMetrics(payload);
 
             // Queue alerts
@@ -102,11 +122,11 @@ public class TelemetryIngestion
     {
         try
         {
-            var machineContainer = GetMachineContainer();
-
-            var machineEntity = new MachineEntity
+            var machineTable = GetMachinesTable();
+            var machineEntity = new TableMachineEntity
             {
-                Id = payload.AgentId,
+                PartitionKey = "machines",
+                RowKey = payload.AgentId,
                 AgentId = payload.AgentId,
                 MachineName = payload.MachineName,
                 DomainName = payload.DomainName,
@@ -116,7 +136,7 @@ public class TelemetryIngestion
                 IsOnline = true
             };
 
-            await machineContainer.UpsertItemAsync(machineEntity, new PartitionKey(machineEntity.AgentId));
+            await machineTable.UpsertEntityAsync(machineEntity, TableUpdateMode.Replace);
             _logger.LogInformation("Updated machine entity for {AgentId}", payload.AgentId);
         }
         catch (Exception ex)
@@ -129,34 +149,16 @@ public class TelemetryIngestion
     {
         try
         {
-            var telemetryContainer = GetTelemetryContainer();
+            var snapshotTask = UpsertMetricSnapshots(payload);
+            var historyTask = InsertMetricHistory(payload);
 
-            foreach (var metric in payload.Metrics)
-            {
-                // Use inverted ticks for descending order (most recent first)
-                var invertedTicks = DateTime.MaxValue.Ticks - metric.Timestamp.Ticks;
-                var rowKey = $"{invertedTicks:D19}_{metric.Category}_{metric.Name}";
-                var encodedKey = Convert.ToBase64String(Encoding.UTF8.GetBytes(rowKey))
-                    .TrimEnd('=')
-                    .Replace('+', '-')
-                    .Replace('/', '_');
+            await Task.WhenAll(snapshotTask, historyTask);
 
-                var telemetryEntity = new TelemetryEntity
-                {
-                    Id = $"{payload.AgentId}_{encodedKey}",
-                    AgentId = payload.AgentId,
-                    MachineName = payload.MachineName,
-                    Category = metric.Category,
-                    MetricName = metric.Name,
-                    MetricValue = metric.Value,
-                    Unit = metric.Unit,
-                    MetricTimestamp = metric.Timestamp
-                };
-
-                await telemetryContainer.CreateItemAsync(telemetryEntity, new PartitionKey(telemetryEntity.AgentId));
-            }
-
-            _logger.LogInformation("Stored {Count} metrics for {AgentId}", payload.Metrics.Count, payload.AgentId);
+            _logger.LogInformation(
+                "Stored {SnapshotCount} snapshot metrics and {HistoryCount} historical metrics for {AgentId}",
+                payload.Metrics.Count,
+                payload.Metrics.Count(IsTrendingMetric),
+                payload.AgentId);
         }
         catch (Exception ex)
         {
@@ -164,18 +166,121 @@ public class TelemetryIngestion
         }
     }
 
-    private Container GetMachineContainer()
+    private async Task UpsertMetricSnapshots(TelemetryPayload payload)
     {
-        return _cosmosClient
-            .GetDatabase(Constants.CosmosDatabaseName)
-            .GetContainer(Constants.MachineContainerName);
+        var snapshotTable = GetMetricSnapshotTable();
+        var entities = payload.Metrics.Select(metric => new TableMetricSnapshotEntity
+        {
+            PartitionKey = payload.AgentId,
+            RowKey = BuildSnapshotRowKey(metric),
+            MachineName = payload.MachineName,
+            Category = metric.Category,
+            MetricName = metric.Name,
+            MetricValue = ConvertMetricValue(metric.Value),
+            Unit = metric.Unit,
+            MetricTimestamp = metric.Timestamp
+        }).ToList();
+
+        await SubmitBatches(
+            snapshotTable,
+            entities,
+            entity => new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity));
     }
 
-    private Container GetTelemetryContainer()
+    private async Task InsertMetricHistory(TelemetryPayload payload)
     {
-        return _cosmosClient
-            .GetDatabase(Constants.CosmosDatabaseName)
-            .GetContainer(Constants.TelemetryContainerName);
+        var historyTable = GetMetricHistoryTable();
+        var entities = payload.Metrics
+            .Where(IsTrendingMetric)
+            .Select(metric => new TableMetricHistoryEntity
+            {
+                PartitionKey = payload.AgentId,
+                RowKey = BuildHistoryRowKey(metric),
+                MachineName = payload.MachineName,
+                Category = metric.Category,
+                MetricName = metric.Name,
+                MetricValue = ConvertMetricValue(metric.Value),
+                Unit = metric.Unit,
+                MetricTimestamp = metric.Timestamp
+            })
+            .ToList();
+
+        await SubmitBatches(
+            historyTable,
+            entities,
+            entity => new TableTransactionAction(TableTransactionActionType.Add, entity));
+    }
+
+    private static async Task SubmitBatches<T>(
+        TableClient tableClient,
+        IReadOnlyCollection<T> entities,
+        Func<T, TableTransactionAction> actionFactory)
+        where T : class, ITableEntity, new()
+    {
+        if (entities.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var batch in entities.Chunk(100))
+        {
+            var actions = batch.Select(actionFactory).ToList();
+            await tableClient.SubmitTransactionAsync(actions);
+        }
+    }
+
+    private static string BuildSnapshotRowKey(MetricData metric)
+    {
+        return $"{SanitizeForKey(metric.Category)}_{SanitizeForKey(metric.Name)}";
+    }
+
+    private static string BuildHistoryRowKey(MetricData metric)
+    {
+        var invertedTicks = DateTime.MaxValue.Ticks - metric.Timestamp.Ticks;
+        return $"{invertedTicks:D19}_{SanitizeForKey(metric.Category)}_{SanitizeForKey(metric.Name)}";
+    }
+
+    private static string SanitizeForKey(string value)
+    {
+        return value
+            .Replace("/", "-")
+            .Replace("\\", "-")
+            .Replace("#", "-")
+            .Replace("?", "-");
+    }
+
+    private static bool IsTrendingMetric(MetricData metric)
+    {
+        var composite = $"{metric.Category}|{metric.Name}";
+        return TrendingMetricPrefixes.Any(prefix => composite.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ConvertMetricValue(object? value)
+    {
+        return value switch
+        {
+            null => string.Empty,
+            DateTime dateTime => dateTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            JsonElement jsonElement => jsonElement.ToString(),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => value.ToString() ?? string.Empty
+        };
+    }
+
+    private TableClient GetMachinesTable()
+    {
+        return _tableServiceClient.GetTableClient(Constants.MachinesTableName);
+    }
+
+    private TableClient GetMetricSnapshotTable()
+    {
+        return _tableServiceClient.GetTableClient(Constants.MetricSnapshotTableName);
+    }
+
+    private TableClient GetMetricHistoryTable()
+    {
+        return _tableServiceClient.GetTableClient(Constants.MetricHistoryTableName);
     }
 }
 

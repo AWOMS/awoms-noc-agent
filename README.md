@@ -25,9 +25,10 @@ A comprehensive Network Operations Center (NOC) monitoring solution for Windows 
 │                    ┌──────────────┴───────────────┐                        │
 │                    ▼                              ▼                        │
 │     ┌─────────────────────────┐    ┌─────────────────────────┐            │
-│     │ Azure Cosmos DB NoSQL   │    │   Azure Queue Storage   │            │
-│     │   (Telemetry Data)      │    │   (Alerts)              │            │
-│     └─────────────────────────┘    └──────────┬──────────────┘            │
+│     │  Azure Table Storage    │    │   Azure Queue Storage   │            │
+│     │  machines / metrics /   │    │   (Alerts)              │            │
+│     │  metrichistory tables   │    └──────────┬──────────────┘            │
+│     └─────────────────────────┘               │                           │
 │                                               │                            │
 │                                               ▼                            │
 │                                ┌─────────────────────────┐                 │
@@ -64,7 +65,8 @@ Configurable thresholds with multi-channel alert delivery:
 - Cost-effective Azure consumption-based pricing (< $5/month expected)
 - Secure API key authentication stored in Azure Key Vault
 - Resilient with automatic retry logic and exponential backoff
-- Cosmos DB (NoSQL API) for telemetry and machine state data
+- Azure Table Storage for telemetry: `machines` (heartbeat/status), `machinemetrics` (current snapshot), `metrichistory` (trending history, 1-year retention)
+- Snapshot + trend-history write strategy — 150 metrics collected but only ~28 trending metrics appended per cycle
 - Queue Storage for reliable alert delivery
 
 ## Prerequisites
@@ -84,16 +86,13 @@ Configurable thresholds with multi-channel alert delivery:
 
 ### 1. Deploy Azure Infrastructure
 
-### 1. Deploy Azure Infrastructure
-
 Follow the step-by-step manual deployment guide:
 
 📖 **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md)**
 
 The guide walks you through creating all required Azure resources using the Azure Portal:
 - Resource Group
-- Storage Account (for queue storage)
-- Azure Cosmos DB account (NoSQL API)
+- Storage Account (for queues and Table Storage)
 - Application Insights
 - Key Vault
 - Function App
@@ -303,81 +302,22 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 - Ensure service runs with sufficient privileges
 - Some metrics (registry, WMI) require administrator access
 
-## Development Setup
-
-### Building from Source
-
-```powershell
-# Clone repository
-git clone https://github.com/AWOMS/awoms-noc-agent.git
-cd awoms-noc-agent
-
-# Restore and build
-dotnet restore
-dotnet build
-
-# Run agent locally (not as service)
-cd src/AWOMS.NOC.Agent
-dotnet run
-
-# Run Functions locally
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Testing
-
-```powershell
-# Build agent for Windows
-dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj -c Release -r win-x64 --self-contained
-
-# Test Functions locally with Azurite + Cosmos DB Emulator
-# Install Azurite: npm install -g azurite
-azurite --silent --location ./azurite --debug ./azurite/debug.log
-
-# Start Cosmos DB Emulator (Docker) separately
-# docker run --name cosmos -p 8081:8081 -m 3g mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator
-
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Project Structure
-
-```
-awoms-noc-agent/
-├── .github/workflows/          # CI/CD pipelines
-│   ├── build-agent.yml         # Build and release agent
-│   └── deploy-functions.yml    # Deploy Azure Functions
-├── docs/                       # Documentation
-│   └── AZURE_DEPLOYMENT.md     # Manual Azure deployment guide
-├── scripts/                    # PowerShell scripts
-│   ├── Install-Agent.ps1       # Agent installer
-│   └── Uninstall-Agent.ps1     # Agent uninstaller
-├── src/
-│   ├── AWOMS.NOC.Shared/       # Shared models and constants
-│   ├── AWOMS.NOC.Agent/        # Windows Service agent
-│   └── AWOMS.NOC.Functions/    # Azure Functions
-└── AWOMS.NOC.sln               # Solution file
-```
-
 ## Network Requirements
 
 The agent requires outbound HTTPS (port 443) access to:
 - `*.azurewebsites.net` (your Function App)
-- `*.documents.azure.com` (Cosmos DB account)
-- `*.queue.core.windows.net` (if direct queue access)
+- `*.table.core.windows.net` (Azure Table Storage)
+- `*.queue.core.windows.net` (Azure Queue Storage)
 
-Ensure your firewall (SonicWall TZ470 or other) allows these connections from your VLANs.
+Ensure your firewall allows these connections from your VLANs.
 
 ## Cost Estimates
 
-Based on 50 machines reporting every 5 minutes:
-- Azure Functions (Consumption): ~$2-3/month
-- Storage (Queue): <$1/month
-- Cosmos DB (Serverless/Free Tier): ~$1-3/month
+Based on 15 machines reporting every 5 minutes:
+- Azure Functions (Consumption): ~$1/month
+- Storage (Tables + Queue): <$1/month
 - Application Insights: ~$1/month (with sampling)
-- **Total: < $5/month**
+- **Total: < $2/month**
 
 Costs scale linearly with machine count and reporting frequency.
 
@@ -393,11 +333,7 @@ Costs scale linearly with machine count and reporting frequency.
 
 ## Contributing
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+Contributions are welcome! For development setup, testing, commit guidelines, and architecture details, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
@@ -413,11 +349,4 @@ For issues, questions, or feature requests:
 
 ## Changelog
 
-### v1.0.0 (Initial Release)
-- ✨ Complete NOC monitoring solution
-- 📊 8 metric collector types
-- 🚨 Multi-channel alerting (Email, Teams, Webhook)
-- 💾 Azure Cosmos DB for telemetry
-- 🔐 Azure Key Vault integration
-- 🤖 GitHub Actions CI/CD
-- 📖 Comprehensive documentation
+📜 See [CHANGELOG.md](CHANGELOG.md) for release history and version updates.

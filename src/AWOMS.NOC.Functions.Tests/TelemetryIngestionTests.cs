@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Microsoft.Azure.Cosmos;
+using Azure.Data.Tables;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,7 +22,7 @@ public class TelemetryIngestionTests
 
         var ingestion = new AWOMS.NOC.Functions.TelemetryIngestion(
             NullLogger<AWOMS.NOC.Functions.TelemetryIngestion>.Instance,
-            Mock.Of<CosmosClient>());
+            Mock.Of<TableServiceClient>());
 
         var result = await ingestion.Run(request);
 
@@ -44,7 +44,7 @@ public class TelemetryIngestionTests
 
         var ingestion = new AWOMS.NOC.Functions.TelemetryIngestion(
             NullLogger<AWOMS.NOC.Functions.TelemetryIngestion>.Instance,
-            Mock.Of<CosmosClient>());
+            Mock.Of<TableServiceClient>());
 
         var result = await ingestion.Run(request);
 
