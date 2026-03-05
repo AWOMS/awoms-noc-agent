@@ -25,7 +25,7 @@ A comprehensive Network Operations Center (NOC) monitoring solution for Windows 
 │                    ┌──────────────┴───────────────┐                        │
 │                    ▼                              ▼                        │
 │     ┌─────────────────────────┐    ┌─────────────────────────┐            │
-│     │   Azure Table Storage   │    │   Azure Queue Storage   │            │
+│     │ Azure Cosmos DB NoSQL   │    │   Azure Queue Storage   │            │
 │     │   (Telemetry Data)      │    │   (Alerts)              │            │
 │     └─────────────────────────┘    └──────────┬──────────────┘            │
 │                                               │                            │
@@ -92,7 +92,8 @@ Follow the step-by-step manual deployment guide:
 
 The guide walks you through creating all required Azure resources using the Azure Portal:
 - Resource Group
-- Storage Account (with tables and queue)
+- Storage Account (for queue storage)
+- Azure Cosmos DB account (NoSQL API)
 - Application Insights
 - Key Vault
 - Function App
@@ -203,7 +204,6 @@ To customize thresholds, edit the agent's `appsettings.json` before installation
 
 Configure alert channels in Azure Function App settings (see the [Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md) for details):
 
-- **Email Alerts**: Set `EmailAlerts_Enabled=true` and `EmailAlerts_To`
 - **Email Alerts**: Set `EmailAlerts_Enabled=true`, `EmailAlerts_From`, `EmailAlerts_To`, and `SendGridApiKey`
 - **Teams Alerts**: Set `TeamsAlerts_WebhookUrl` with your webhook URL
 - **Generic Webhook**: Set `GenericWebhook_Url` for custom integrations
@@ -285,8 +285,8 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 
 **500 Internal Server errors**
 - Check Application Insights for exceptions
-- Verify storage account connection string is valid
-- Ensure tables and queues are created
+- Verify `AzureWebJobsStorage` and `CosmosDbConnectionString` are valid
+- Ensure Cosmos DB database/containers (`awomsnoc`, `machines`, `telemetry`) exist
 
 **No alerts being sent**
 - Verify alert configuration in Function App settings
@@ -331,9 +331,13 @@ func start
 # Build agent for Windows
 dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj -c Release -r win-x64 --self-contained
 
-# Test Functions locally with Azurite
+# Test Functions locally with Azurite + Cosmos DB Emulator
 # Install Azurite: npm install -g azurite
 azurite --silent --location ./azurite --debug ./azurite/debug.log
+
+# Start Cosmos DB Emulator (Docker) separately
+# docker run --name cosmos -p 8081:8081 -m 3g mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator
+
 cd src/AWOMS.NOC.Functions
 func start
 ```
@@ -361,7 +365,7 @@ awoms-noc-agent/
 
 The agent requires outbound HTTPS (port 443) access to:
 - `*.azurewebsites.net` (your Function App)
-- `*.table.core.windows.net` (if direct table access)
+- `*.documents.azure.com` (Cosmos DB account)
 - `*.queue.core.windows.net` (if direct queue access)
 
 Ensure your firewall (SonicWall TZ470 or other) allows these connections from your VLANs.
@@ -370,7 +374,8 @@ Ensure your firewall (SonicWall TZ470 or other) allows these connections from yo
 
 Based on 50 machines reporting every 5 minutes:
 - Azure Functions (Consumption): ~$2-3/month
-- Storage (Table + Queue): ~$1-2/month
+- Storage (Queue): <$1/month
+- Cosmos DB (Serverless/Free Tier): ~$1-3/month
 - Application Insights: ~$1/month (with sampling)
 - **Total: < $5/month**
 
@@ -412,7 +417,7 @@ For issues, questions, or feature requests:
 - ✨ Complete NOC monitoring solution
 - 📊 8 metric collector types
 - 🚨 Multi-channel alerting (Email, Teams, Webhook)
-- 💾 Azure Table Storage for telemetry
+- 💾 Azure Cosmos DB for telemetry
 - 🔐 Azure Key Vault integration
 - 🤖 GitHub Actions CI/CD
 - 📖 Comprehensive documentation

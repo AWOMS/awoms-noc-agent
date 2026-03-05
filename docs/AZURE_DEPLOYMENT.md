@@ -31,14 +31,6 @@ This guide walks you through creating the Azure resources required for the AWOMS
 5. Click **Review + create**, then **Create**
 6. After deployment, go to the storage account
 
-### Create Tables
-
-1. In the storage account, navigate to **Data storage** → **Tables**
-2. Click **+ Table** and create:
-   - Table name: `machines`
-3. Click **+ Table** again and create:
-   - Table name: `telemetry`
-
 ### Create Queue
 
 1. In the storage account, navigate to **Data storage** → **Queues**
@@ -51,7 +43,24 @@ This guide walks you through creating the Azure resources required for the AWOMS
 2. Click **Show keys**
 3. Copy the **Connection string** from key1 (you'll need this later)
 
-## Step 3: Create Application Insights
+## Step 3: Create a Cosmos DB Account (NoSQL API)
+
+1. In your resource group, click **+ Create**
+2. Search for "Azure Cosmos DB" and select it
+3. Choose **Azure Cosmos DB for NoSQL**
+4. Fill in the details:
+   - **Account name**: Enter a globally unique name (e.g., `awomsnoc-cosmos`)
+   - **Region**: Same as your resource group
+   - **Capacity mode**: Serverless (recommended for small workloads)
+5. Click **Review + create**, then **Create**
+6. After deployment, open the Cosmos DB account
+7. Navigate to **Data Explorer** and create:
+   - **Database**: `awomsnoc`
+   - **Container**: `machines` with partition key `/agentId`
+   - **Container**: `telemetry` with partition key `/agentId`
+8. Navigate to **Keys** and copy the **Primary Connection String** (for `CosmosDbConnectionString`)
+
+## Step 4: Create Application Insights
 
 1. In your resource group, click **+ Create**
 2. Search for "Application Insights" and select it
@@ -66,7 +75,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
 7. Navigate to **Configure** → **Properties**
 8. Copy the **Instrumentation Key** and **Connection String** (you'll need these later)
 
-## Step 4: Create a Key Vault
+## Step 5: Create a Key Vault
 
 1. In your resource group, click **+ Create**
 2. Search for "Key Vault" and select it
@@ -86,7 +95,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
 11. Click on the secret, then the current version
 12. Copy the **Secret Identifier** (URI) for later use
 
-## Step 5: Create a Function App
+## Step 6: Create a Function App
 
 1. In your resource group, click **+ Create**
 2. Search for "Function App" and select it
@@ -118,7 +127,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
    | `WEBSITE_CONTENTSHARE` | Your function app name in lowercase |
    | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
    | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
-   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 3 |
+   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 4 |
    | `CosmosDbConnectionString` | Cosmos DB connection string for central data storage |
    | `ApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `HeartbeatTimeoutMinutes` | `5` |
@@ -146,7 +155,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
 10. Search for and select your Function App's managed identity (using the Object ID)
 11. Click **Next**, **Next**, then **Create**
 
-## Step 6: Deploy Function App Code
+## Step 7: Deploy Function App Code
 
 You can deploy the Function App code using one of these methods:
 
@@ -179,7 +188,7 @@ func azure functionapp publish <your-function-app-name>
 
 Use the Azure Functions extension to publish directly from your IDE.
 
-## Step 7: Verify Deployment
+## Step 8: Verify Deployment
 
 1. In the Azure Portal, go to your Function App
 2. Navigate to **Functions**
@@ -194,7 +203,7 @@ Use the Azure Functions extension to publish directly from your IDE.
    - Click on the current version
    - Click **Show Secret Value** and copy it
 
-## Step 8: Install Agents on Windows Machines
+## Step 9: Install Agents on Windows Machines
 
 1. Download the latest agent release from GitHub
 2. Extract to a temporary location
@@ -248,10 +257,10 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 ### View Telemetry Data
 
-1. Go to your Storage Account
-2. Navigate to **Data storage** → **Tables**
-3. Select the `machines` or `telemetry` table
-4. Use Storage Browser or Azure Storage Explorer to query data
+1. Go to your Cosmos DB account
+2. Navigate to **Data Explorer**
+3. Open database `awomsnoc`
+4. Query `machines` or `telemetry` containers
 
 ### Monitor Function Performance
 
@@ -295,7 +304,7 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 - Use Consumption plan for Function App (pay per execution)
 - Enable Application Insights sampling to reduce costs
-- Set retention policies on Storage tables
+- Configure Cosmos DB TTL/retention policies on telemetry container
 - Review and adjust collection/reporting intervals in agents
 
 ## Security Best Practices
