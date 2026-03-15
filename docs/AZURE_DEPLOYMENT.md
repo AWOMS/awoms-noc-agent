@@ -5,7 +5,8 @@ This guide walks you through creating the Azure resources required for the AWOMS
 ## Prerequisites
 
 - Azure subscription with appropriate permissions to create resources
-- Estimated cost: < $1/month for 15 machines (Azure Table Storage)
+- Existing Linux B2 App Service Plan in the target region
+- Estimated incremental cost: low for Storage and Application Insights; compute is billed through the existing App Service Plan
 
 ## Step 1: Create a Resource Group
 
@@ -81,14 +82,16 @@ Table Storage uses the same Storage Account created in Step 2 — no separate re
    - **Pricing tier**: Standard
 5. Click **Review + create**, then **Create**
 6. After deployment, go to the Key Vault
-7. Navigate to **Objects** → **Secrets**
-8. Click **+ Generate/Import**
-9. Create a secret:
+7. Check **Access configuration** to see whether the vault uses **Azure role-based access control** or **Vault access policy**
+8. If the vault uses **Azure role-based access control** and you can't create secrets, grant yourself **Key Vault Secrets Officer** (or **Key Vault Administrator**) on the vault, then wait a few minutes for permissions to propagate
+9. Navigate to **Objects** → **Secrets**
+10. Click **+ Generate/Import**
+11. Create a secret:
    - **Name**: `ApiKey`
    - **Value**: Generate a secure random string (e.g., using PowerShell: `[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([System.Guid]::NewGuid().ToString()))`)
-10. Click **Create**
-11. Click on the secret, then the current version
-12. Copy the **Secret Identifier** (URI) for later use
+12. Click **Create**
+13. Click on the secret, then the current version
+14. Copy the **Secret Identifier** (URI) for later use
 
 ## Step 6: Create a Function App
 
@@ -100,14 +103,24 @@ Table Storage uses the same Storage Account created in Step 2 — no separate re
    - **Runtime stack**: .NET
    - **Version**: 10 (isolated)
    - **Region**: Same as your resource group
-   - **Operating System**: Windows
-   - **Plan type**: Consumption (Serverless)
+   - **Operating System**: Linux
+   - **Plan type**: App Service Plan
+   - **App Service Plan**: Select your existing Linux B2 App Service Plan
    - **Storage account**: Select the storage account created in Step 2
 5. Click **Next: Networking** (keep defaults)
 6. Click **Next: Monitoring**
    - **Enable Application Insights**: Yes
    - **Application Insights**: Select the one created in Step 3
 7. Click **Review + create**, then **Create**
+
+### Enable Always On
+
+1. After deployment, go to the Function App
+2. Navigate to **Settings** → **Configuration** → **General settings**
+3. Set **Always On** to **On**
+4. Click **Save**
+
+> **Important:** This app uses timer and queue triggers. On an App Service Plan, **Always On** should be enabled so non-HTTP triggers continue to run reliably.
 
 ### Configure Function App Settings
 
@@ -117,17 +130,16 @@ Table Storage uses the same Storage Account created in Step 2 — no separate re
 
    | Name | Value |
    |------|-------|
-   | `AzureWebJobsStorage` | Connection string from Step 2 |
-   | `WEBSITE_CONTENTAZUREFILECONNECTIONSTRING` | Connection string from Step 2 |
-   | `WEBSITE_CONTENTSHARE` | Your function app name in lowercase |
-   | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
-   | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
    | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 4 |
+   | `AzureWebJobsStorage` | Connection string from Step 2 |
+   | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
+   | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
    | `TableStorageConnectionString` | Connection string from Step 2 (same Storage Account) |
-   | `ApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
+   | `WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED` | `1`
+   | `ApiKey1` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `HeartbeatTimeoutMinutes` | `5` |
    | `EmailAlerts_Enabled` | `false` (or `true` if configuring email) |
-   | `SendGridApiKey` | Your SendGrid API key |
+   | `SendGridApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `EmailAlerts_From` | Sender address (e.g., `noc-alerts@yourdomain.com`) |
    | `EmailAlerts_To` | Your email address |
    | `TeamsAlerts_WebhookUrl` | Your Teams webhook URL (if using) |
@@ -142,13 +154,16 @@ Table Storage uses the same Storage Account created in Step 2 — no separate re
 3. Click **Save** and **Yes** to confirm
 4. Copy the **Object (principal) ID**
 5. Go back to your Key Vault
-6. Navigate to **Access policies**
-7. Click **+ Create**
-8. Under **Secret permissions**, select:
-   - **Get**
-9. Click **Next**
-10. Search for and select your Function App's managed identity (using the Object ID)
-11. Click **Next**, **Next**, then **Create**
+6. If the vault uses **Azure role-based access control**:
+   - Go to **Access control (IAM)**
+   - Add the **Key Vault Secrets User** role for your Function App's managed identity
+7. If the vault uses **Vault access policy**:
+   - Navigate to **Access policies**
+   - Click **+ Create**
+   - Under **Secret permissions**, select **Get**
+   - Click **Next**
+   - Search for and select your Function App's managed identity (using the Object ID)
+   - Click **Next**, **Next**, then **Create**
 
 ## Step 7: Deploy Function App Code
 
@@ -301,9 +316,9 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 ## Cost Optimization
 
-- Use Consumption plan for Function App (pay per execution)
+- Reuse the existing Linux B2 App Service Plan if it has spare capacity
 - Enable Application Insights sampling to reduce costs
-- Configure Cosmos DB TTL/retention policies on telemetry container
+- Review App Service Plan utilization before adding more workloads
 - Review and adjust collection/reporting intervals in agents
 
 ## Security Best Practices

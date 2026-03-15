@@ -337,7 +337,7 @@ Contributions are welcome! For development setup, testing, commit guidelines, an
 
 ## License
 
-Copyright © 2024 AWOMS. All rights reserved.
+Copyright © 2026 AWOMS. All rights reserved.
 
 This software is proprietary and confidential. Unauthorized copying, distribution, or use is strictly prohibited.
 
