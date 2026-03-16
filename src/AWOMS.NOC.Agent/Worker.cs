@@ -1,6 +1,7 @@
 using AWOMS.NOC.Agent.Collectors;
 using AWOMS.NOC.Agent.Services;
 using AWOMS.NOC.Shared.Models;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 
@@ -38,7 +39,15 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("AWOMS NOC Agent started. AgentId: {AgentId}", _agentId);
+        _logger.LogInformation(
+            "AWOMS NOC Agent started on {MachineName} ({DomainName}). AgentId: {AgentId}. " +
+            "Collecting every {CollectionInterval}s, reporting every {ReportingInterval}s to {ApiEndpoint}",
+            _machineName,
+            _domainName,
+            _agentId,
+            _configuration.CollectionIntervalSeconds,
+            _configuration.ReportingIntervalSeconds,
+            _configuration.ApiEndpoint);
 
         try
         {
@@ -68,9 +77,9 @@ public class Worker : BackgroundService
             var waitSeconds = _configuration.CollectionIntervalSeconds;
             var nextExecutionUtc = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
             _logger.LogInformation(
-                "Next metric collection at {NextExecutionUtc} UTC (in {WaitSeconds} seconds)",
-                nextExecutionUtc,
-                waitSeconds);
+                "Waiting {WaitSeconds}s — next collection at {NextTime:HH:mm:ss} UTC",
+                waitSeconds,
+                nextExecutionUtc);
 
             if (!await timer.WaitForNextTickAsync(stoppingToken))
             {
@@ -80,13 +89,16 @@ public class Worker : BackgroundService
             try
             {
                 var metrics = new List<MetricData>();
-                
+                var sw = Stopwatch.StartNew();
+                var collectorCount = 0;
+
                 foreach (var collector in _collectors)
                 {
                     try
                     {
                         var collectorMetrics = await collector.CollectAsync();
                         metrics.AddRange(collectorMetrics);
+                        collectorCount++;
 
 _logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetrics.Count, collector.GetType().Name);
                         if (_logger.IsEnabled(LogLevel.Debug))
@@ -123,13 +135,22 @@ _logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetr
                     
                     if (criticalAlerts.Any())
                     {
-                        _logger.LogWarning("Critical alerts detected: {Count}", criticalAlerts.Count);
+                        var alertSummary = string.Join(", ", criticalAlerts.Select(a => $"{a.Category}/{a.MetricName}"));
+                        _logger.LogWarning(
+                            "Critical alerts detected — sending {Count} immediately: {AlertSummary}",
+                            criticalAlerts.Count,
+                            alertSummary);
                         // Send immediately
                         await SendTelemetryWithAlerts(metrics, criticalAlerts);
                     }
                 }
 
-                _logger.LogInformation("Collected {Count} metrics", metrics.Count);
+                sw.Stop();
+                _logger.LogInformation(
+                    "Metric collection complete: {MetricCount} metrics from {CollectorCount} collectors in {ElapsedMs}ms",
+                    metrics.Count,
+                    collectorCount,
+                    sw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
@@ -145,9 +166,9 @@ _logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetr
             var waitSeconds = _configuration.ReportingIntervalSeconds;
             var nextExecutionUtc = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
             _logger.LogInformation(
-                "Next telemetry report at {NextExecutionUtc} UTC (in {WaitSeconds} seconds)",
-                nextExecutionUtc,
-                waitSeconds);
+                "Waiting {WaitSeconds}s — next telemetry report at {NextTime:HH:mm:ss} UTC",
+                waitSeconds,
+                nextExecutionUtc);
 
             if (!await timer.WaitForNextTickAsync(stoppingToken))
             {
@@ -167,6 +188,10 @@ _logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetr
                 {
                     var alerts = _alertEvaluator.EvaluateMetrics(metricsToSend, _agentId, _machineName);
                     await SendTelemetryWithAlerts(metricsToSend, alerts);
+                }
+                else
+                {
+                    _logger.LogInformation("Reporting cycle skipped — no metrics queued");
                 }
             }
             catch (Exception ex)
@@ -194,8 +219,11 @@ _logger.LogDebug("Collected {Count} metrics from {CollectorType}", collectorMetr
         
         if (success)
         {
-            _logger.LogInformation("Sent {MetricCount} metrics and {AlertCount} alerts", 
-                metrics.Count, alerts.Count);
+            _logger.LogInformation(
+                "Telemetry sent for {MachineName}: {MetricCount} metrics, {AlertCount} alerts",
+                _machineName,
+                metrics.Count,
+                alerts.Count);
         }
         else
         {

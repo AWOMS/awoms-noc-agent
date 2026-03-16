@@ -10,6 +10,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
