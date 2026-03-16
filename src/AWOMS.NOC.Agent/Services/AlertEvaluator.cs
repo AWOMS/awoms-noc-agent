@@ -90,6 +90,56 @@ public class AlertEvaluator
                     }
                     break;
 
+                case "WindowsUpdate":
+                    if (metric.Name == "Critical Updates Available" && TryConvertToDouble(metric.Value, out var criticalUpdates))
+                    {
+                        if (criticalUpdates > 0)
+                        {
+                            alert = CreateAlert(agentId, machineName, "Warning", metric,
+                                $"Critical/important updates available: {criticalUpdates}", 0);
+                        }
+                    }
+                    else if (metric.Name == "Days Since Last Update" && TryConvertToDouble(metric.Value, out var daysSinceLastUpdate)
+                        && daysSinceLastUpdate > _thresholds.CriticalUpdatesPendingDays)
+                    {
+                        alert = CreateAlert(agentId, machineName, "Critical", metric,
+                            $"Last successful update is stale: {daysSinceLastUpdate:F1} days",
+                            _thresholds.CriticalUpdatesPendingDays);
+                    }
+                    break;
+
+                case "ActiveDirectory":
+                    if (metric.Name.Contains("Password Age") && TryConvertToDouble(metric.Value, out var passwordAgeDays)
+                        && passwordAgeDays > _thresholds.PasswordMaxAgeDays)
+                    {
+                        alert = CreateAlert(agentId, machineName, "Warning", metric,
+                            $"User password age exceeds threshold: {passwordAgeDays:F1} days",
+                            _thresholds.PasswordMaxAgeDays);
+                    }
+                    else if (metric.Name == "Users With Expired Passwords" && TryConvertToDouble(metric.Value, out var expiredCount)
+                        && expiredCount > 0)
+                    {
+                        alert = CreateAlert(agentId, machineName, "Warning", metric,
+                            $"Domain users with expired password age threshold: {expiredCount}",
+                            0);
+                    }
+                    break;
+
+                case "NetworkConnectivity":
+                    if (metric.Name.Contains("Ping Status") && metric.Value is string pingStatus &&
+                        !pingStatus.Equals("Success", StringComparison.OrdinalIgnoreCase))
+                    {
+                        alert = CreateAlert(agentId, machineName, "Critical", metric,
+                            $"Ping target unreachable: {metric.Name} ({pingStatus})", "Success");
+                    }
+                    else if (metric.Name.Contains("Ping Latency") && TryConvertToDouble(metric.Value, out var pingLatencyMs)
+                        && pingLatencyMs >= 0 && pingLatencyMs > _thresholds.PingLatencyWarningMs)
+                    {
+                        alert = CreateAlert(agentId, machineName, "Warning", metric,
+                            $"Ping latency high: {pingLatencyMs:F0}ms", _thresholds.PingLatencyWarningMs);
+                    }
+                    break;
+
                 case "Security":
                     if (metric.Name == "Antivirus Status" && metric.Value is string avStatus)
                     {
@@ -144,5 +194,33 @@ public class AlertEvaluator
             ThresholdValue = thresholdValue,
             Timestamp = DateTime.UtcNow
         };
+    }
+
+    private static bool TryConvertToDouble(object? value, out double result)
+    {
+        switch (value)
+        {
+            case double d:
+                result = d;
+                return true;
+            case float f:
+                result = f;
+                return true;
+            case int i:
+                result = i;
+                return true;
+            case long l:
+                result = l;
+                return true;
+            case decimal m:
+                result = (double)m;
+                return true;
+            case string s when double.TryParse(s, out var parsed):
+                result = parsed;
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
     }
 }

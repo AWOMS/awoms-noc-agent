@@ -44,17 +44,6 @@ public class SystemMetricCollector : IMetricCollector
                     Unit = "boolean",
                     Timestamp = DateTime.UtcNow
                 });
-                
-                // Windows Update Status
-                var updateStatus = CheckWindowsUpdateStatus();
-                metrics.Add(new MetricData
-                {
-                    Category = "System",
-                    Name = "Windows Update Status",
-                    Value = updateStatus,
-                    Unit = "status",
-                    Timestamp = DateTime.UtcNow
-                });
             }
         }
         catch (Exception ex)
@@ -97,30 +86,4 @@ public class SystemMetricCollector : IMetricCollector
         }
     }
 
-    private string CheckWindowsUpdateStatus()
-    {
-        try
-        {
-            // This is a simplified check - in production, you might want to use Windows Update Agent API
-            using var wuKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install");
-            if (wuKey != null)
-            {
-                var lastSuccessTime = wuKey.GetValue("LastSuccessTime") as string;
-                if (!string.IsNullOrEmpty(lastSuccessTime) && DateTime.TryParse(lastSuccessTime, out var lastUpdate))
-                {
-                    var daysSinceUpdate = (DateTime.UtcNow - lastUpdate).TotalDays;
-                    if (daysSinceUpdate > 7)
-                    {
-                        return $"Updates pending ({Math.Round(daysSinceUpdate)} days since last update)";
-                    }
-                    return $"Up to date (last update: {Math.Round(daysSinceUpdate)} days ago)";
-                }
-            }
-            return "Status unknown";
-        }
-        catch
-        {
-            return "Unable to check";
-        }
-    }
 }

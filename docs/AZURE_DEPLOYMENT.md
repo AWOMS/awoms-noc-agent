@@ -5,7 +5,8 @@ This guide walks you through creating the Azure resources required for the AWOMS
 ## Prerequisites
 
 - Azure subscription with appropriate permissions to create resources
-- Estimated cost: < $5/month for 50 machines
+- Existing Linux B2 App Service Plan in the target region
+- Estimated incremental cost: low for Storage and Application Insights; compute is billed through the existing App Service Plan
 
 ## Step 1: Create a Resource Group
 
@@ -31,14 +32,6 @@ This guide walks you through creating the Azure resources required for the AWOMS
 5. Click **Review + create**, then **Create**
 6. After deployment, go to the storage account
 
-### Create Tables
-
-1. In the storage account, navigate to **Data storage** → **Tables**
-2. Click **+ Table** and create:
-   - Table name: `machines`
-3. Click **+ Table** again and create:
-   - Table name: `telemetry`
-
 ### Create Queue
 
 1. In the storage account, navigate to **Data storage** → **Queues**
@@ -51,7 +44,19 @@ This guide walks you through creating the Azure resources required for the AWOMS
 2. Click **Show keys**
 3. Copy the **Connection string** from key1 (you'll need this later)
 
-## Step 3: Create Application Insights
+## Step 3: Create Tables in the Storage Account
+
+Table Storage uses the same Storage Account created in Step 2 — no separate resource needed.
+
+1. In the storage account, navigate to **Data storage** → **Tables**
+2. Click **+ Table** and create three tables:
+   - Table name: `machines`
+   - Table name: `machinemetrics`
+   - Table name: `metrichistory`
+
+> **Note:** The Function App will also create these tables automatically on first startup if they do not exist.
+
+## Step 4: Create Application Insights
 
 1. In your resource group, click **+ Create**
 2. Search for "Application Insights" and select it
@@ -66,7 +71,7 @@ This guide walks you through creating the Azure resources required for the AWOMS
 7. Navigate to **Configure** → **Properties**
 8. Copy the **Instrumentation Key** and **Connection String** (you'll need these later)
 
-## Step 4: Create a Key Vault
+## Step 5: Create a Key Vault
 
 1. In your resource group, click **+ Create**
 2. Search for "Key Vault" and select it
@@ -77,16 +82,18 @@ This guide walks you through creating the Azure resources required for the AWOMS
    - **Pricing tier**: Standard
 5. Click **Review + create**, then **Create**
 6. After deployment, go to the Key Vault
-7. Navigate to **Objects** → **Secrets**
-8. Click **+ Generate/Import**
-9. Create a secret:
+7. Check **Access configuration** to see whether the vault uses **Azure role-based access control** or **Vault access policy**
+8. If the vault uses **Azure role-based access control** and you can't create secrets, grant yourself **Key Vault Secrets Officer** (or **Key Vault Administrator**) on the vault, then wait a few minutes for permissions to propagate
+9. Navigate to **Objects** → **Secrets**
+10. Click **+ Generate/Import**
+11. Create a secret:
    - **Name**: `ApiKey`
    - **Value**: Generate a secure random string (e.g., using PowerShell: `[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([System.Guid]::NewGuid().ToString()))`)
-10. Click **Create**
-11. Click on the secret, then the current version
-12. Copy the **Secret Identifier** (URI) for later use
+12. Click **Create**
+13. Click on the secret, then the current version
+14. Copy the **Secret Identifier** (URI) for later use
 
-## Step 5: Create a Function App
+## Step 6: Create a Function App
 
 1. In your resource group, click **+ Create**
 2. Search for "Function App" and select it
@@ -96,14 +103,24 @@ This guide walks you through creating the Azure resources required for the AWOMS
    - **Runtime stack**: .NET
    - **Version**: 10 (isolated)
    - **Region**: Same as your resource group
-   - **Operating System**: Windows
-   - **Plan type**: Consumption (Serverless)
+   - **Operating System**: Linux
+   - **Plan type**: App Service Plan
+   - **App Service Plan**: Select your existing Linux B2 App Service Plan
    - **Storage account**: Select the storage account created in Step 2
 5. Click **Next: Networking** (keep defaults)
 6. Click **Next: Monitoring**
    - **Enable Application Insights**: Yes
    - **Application Insights**: Select the one created in Step 3
 7. Click **Review + create**, then **Create**
+
+### Enable Always On
+
+1. After deployment, go to the Function App
+2. Navigate to **Settings** → **Configuration** → **General settings**
+3. Set **Always On** to **On**
+4. Click **Save**
+
+> **Important:** This app uses timer and queue triggers. On an App Service Plan, **Always On** should be enabled so non-HTTP triggers continue to run reliably.
 
 ### Configure Function App Settings
 
@@ -113,15 +130,17 @@ This guide walks you through creating the Azure resources required for the AWOMS
 
    | Name | Value |
    |------|-------|
+   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 4 |
    | `AzureWebJobsStorage` | Connection string from Step 2 |
-   | `WEBSITE_CONTENTAZUREFILECONNECTIONSTRING` | Connection string from Step 2 |
-   | `WEBSITE_CONTENTSHARE` | Your function app name in lowercase |
-   | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
    | `FUNCTIONS_EXTENSION_VERSION` | `~4` |
-   | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string from Step 3 |
-   | `ApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
+   | `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
+   | `TableStorageConnectionString` | Connection string from Step 2 (same Storage Account) |
+   | `WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED` | `1`
+   | `ApiKey1` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
    | `HeartbeatTimeoutMinutes` | `5` |
    | `EmailAlerts_Enabled` | `false` (or `true` if configuring email) |
+   | `SendGridApiKey` | Use Key Vault reference: `@Microsoft.KeyVault(SecretUri=YOUR_SECRET_URI)` |
+   | `EmailAlerts_From` | Sender address (e.g., `noc-alerts@yourdomain.com`) |
    | `EmailAlerts_To` | Your email address |
    | `TeamsAlerts_WebhookUrl` | Your Teams webhook URL (if using) |
    | `GenericWebhook_Url` | Your webhook URL (if using) |
@@ -135,15 +154,18 @@ This guide walks you through creating the Azure resources required for the AWOMS
 3. Click **Save** and **Yes** to confirm
 4. Copy the **Object (principal) ID**
 5. Go back to your Key Vault
-6. Navigate to **Access policies**
-7. Click **+ Create**
-8. Under **Secret permissions**, select:
-   - **Get**
-9. Click **Next**
-10. Search for and select your Function App's managed identity (using the Object ID)
-11. Click **Next**, **Next**, then **Create**
+6. If the vault uses **Azure role-based access control**:
+   - Go to **Access control (IAM)**
+   - Add the **Key Vault Secrets User** role for your Function App's managed identity
+7. If the vault uses **Vault access policy**:
+   - Navigate to **Access policies**
+   - Click **+ Create**
+   - Under **Secret permissions**, select **Get**
+   - Click **Next**
+   - Search for and select your Function App's managed identity (using the Object ID)
+   - Click **Next**, **Next**, then **Create**
 
-## Step 6: Deploy Function App Code
+## Step 7: Deploy Function App Code
 
 You can deploy the Function App code using one of these methods:
 
@@ -176,14 +198,15 @@ func azure functionapp publish <your-function-app-name>
 
 Use the Azure Functions extension to publish directly from your IDE.
 
-## Step 7: Verify Deployment
+## Step 8: Verify Deployment
 
 1. In the Azure Portal, go to your Function App
 2. Navigate to **Functions**
-3. You should see three functions:
+3. You should see four functions:
    - `TelemetryIngestion`
    - `HeartbeatMonitor`
    - `AlertProcessor`
+   - `MetricHistoryCleanup` (runs daily at 02:00 UTC, deletes history older than 1 year)
 4. Click on `TelemetryIngestion` and note the **Function URL** (you'll need this for agent configuration)
 5. Get the API key:
    - Go to your Key Vault
@@ -191,7 +214,7 @@ Use the Azure Functions extension to publish directly from your IDE.
    - Click on the current version
    - Click **Show Secret Value** and copy it
 
-## Step 8: Install Agents on Windows Machines
+## Step 9: Install Agents on Windows Machines
 
 1. Download the latest agent release from GitHub
 2. Extract to a temporary location
@@ -220,8 +243,11 @@ The agent's `appsettings.json` includes configurable thresholds:
     "CpuUsageWarningPercent": 85.0,
     "DiskQueueCritical": 3.0,
     "DiskQueueSustainedMinutes": 15,
-    "HeartbeatTimeoutMinutes": 5,
-    "WindowsUpdatePendingDays": 7
+      "HeartbeatTimeoutMinutes": 5,
+      "WindowsUpdatePendingDays": 7,
+      "PasswordMaxAgeDays": 31,
+      "PingLatencyWarningMs": 200,
+      "CriticalUpdatesPendingDays": 7
   }
 }
 ```
@@ -230,8 +256,11 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 | Setting | Purpose | Default |
 |---------|---------|---------|
+| `TableStorageConnectionString` | Azure Storage Account connection string | Required |
 | `HeartbeatTimeoutMinutes` | Minutes before machine marked offline | 5 |
 | `EmailAlerts_Enabled` | Enable email notifications | false |
+| `SendGridApiKey` | SendGrid API key for email alerts | - |
+| `EmailAlerts_From` | Sender email address | - |
 | `EmailAlerts_To` | Email recipient | - |
 | `TeamsAlerts_WebhookUrl` | Microsoft Teams webhook | - |
 | `GenericWebhook_Url` | Custom webhook endpoint | - |
@@ -242,8 +271,10 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 1. Go to your Storage Account
 2. Navigate to **Data storage** → **Tables**
-3. Select the `machines` or `telemetry` table
-4. Use Storage Browser or Azure Storage Explorer to query data
+3. Open one of the three tables:
+   - `machines` — one row per workstation, current heartbeat and online status
+   - `machinemetrics` — one row per metric per workstation, current snapshot of all latest values
+   - `metrichistory` — time-series history for trending metrics (disk space, CPU, memory, etc.), retained for 1 year
 
 ### Monitor Function Performance
 
@@ -285,9 +316,9 @@ The agent's `appsettings.json` includes configurable thresholds:
 
 ## Cost Optimization
 
-- Use Consumption plan for Function App (pay per execution)
+- Reuse the existing Linux B2 App Service Plan if it has spare capacity
 - Enable Application Insights sampling to reduce costs
-- Set retention policies on Storage tables
+- Review App Service Plan utilization before adding more workloads
 - Review and adjust collection/reporting intervals in agents
 
 ## Security Best Practices

@@ -12,4 +12,7 @@ public class ThresholdsConfiguration
     public int DiskQueueSustainedMinutes { get; set; } = 15;
     public int HeartbeatTimeoutMinutes { get; set; } = 5;
     public int WindowsUpdatePendingDays { get; set; } = 7;
+    public int PasswordMaxAgeDays { get; set; } = 31;
+    public int PingLatencyWarningMs { get; set; } = 200;
+    public int CriticalUpdatesPendingDays { get; set; } = 7;
 }

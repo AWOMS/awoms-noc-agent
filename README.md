@@ -25,9 +25,10 @@ A comprehensive Network Operations Center (NOC) monitoring solution for Windows 
 │                    ┌──────────────┴───────────────┐                        │
 │                    ▼                              ▼                        │
 │     ┌─────────────────────────┐    ┌─────────────────────────┐            │
-│     │   Azure Table Storage   │    │   Azure Queue Storage   │            │
-│     │   (Telemetry Data)      │    │   (Alerts)              │            │
-│     └─────────────────────────┘    └──────────┬──────────────┘            │
+│     │  Azure Table Storage    │    │   Azure Queue Storage   │            │
+│     │  machines / metrics /   │    │   (Alerts)              │            │
+│     │  metrichistory tables   │    └──────────┬──────────────┘            │
+│     └─────────────────────────┘               │                           │
 │                                               │                            │
 │                                               ▼                            │
 │                                ┌─────────────────────────┐                 │
@@ -44,8 +45,10 @@ A comprehensive Network Operations Center (NOC) monitoring solution for Windows 
 - **Disk**: Free space percentage, disk queue length, total size
 - **Memory**: Usage percentage, available/total memory
 - **CPU**: Processor utilization percentage
-- **Network**: Interface status, bytes sent/received per second
-- **System**: Last boot time, uptime, pending reboot detection, Windows Update status
+- **Network**: Interface status, bytes sent/received per second, public IP detection, ping target connectivity/latency
+- **System**: Last boot time, uptime, pending reboot detection
+- **Windows Update**: Available updates, critical/important update count, last update install time, update age
+- **Active Directory**: Domain user password age threshold monitoring
 - **Security**: Antivirus and firewall status
 - **Services**: Critical Windows services monitoring (DNS, Print Spooler, etc.)
 - **Event Log**: Critical system and application event monitoring
@@ -62,7 +65,8 @@ Configurable thresholds with multi-channel alert delivery:
 - Cost-effective Azure consumption-based pricing (< $5/month expected)
 - Secure API key authentication stored in Azure Key Vault
 - Resilient with automatic retry logic and exponential backoff
-- Table Storage for telemetry data (efficient querying)
+- Azure Table Storage for telemetry: `machines` (heartbeat/status), `machinemetrics` (current snapshot), `metrichistory` (trending history, 1-year retention)
+- Snapshot + trend-history write strategy — 150 metrics collected but only ~28 trending metrics appended per cycle
 - Queue Storage for reliable alert delivery
 
 ## Prerequisites
@@ -82,15 +86,13 @@ Configurable thresholds with multi-channel alert delivery:
 
 ### 1. Deploy Azure Infrastructure
 
-### 1. Deploy Azure Infrastructure
-
 Follow the step-by-step manual deployment guide:
 
 📖 **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md)**
 
 The guide walks you through creating all required Azure resources using the Azure Portal:
 - Resource Group
-- Storage Account (with tables and queue)
+- Storage Account (for queues and Table Storage)
 - Application Insights
 - Key Vault
 - Function App
@@ -136,7 +138,10 @@ Edit `appsettings.json` to customize agent behavior:
     "ApiKey": "your-api-key-here",
     "CollectionIntervalSeconds": 60,
     "ReportingIntervalSeconds": 300,
-    "EnableLocalAlerts": true
+    "EnableLocalAlerts": true,
+    "PublicIpUrl": "https://api.ipify.org/",
+    "PingTargets": ["8.8.8.8", "1.1.1.1"],
+    "MonitoredServices": ["Dnscache", "LanmanServer", "LanmanWorkstation", "Spooler", "W32Time", "WinDefend"]
   }
 }
 ```
@@ -148,6 +153,9 @@ Edit `appsettings.json` to customize agent behavior:
 | `CollectionIntervalSeconds` | How often to collect metrics | 60 |
 | `ReportingIntervalSeconds` | How often to send telemetry | 300 |
 | `EnableLocalAlerts` | Evaluate alerts locally for immediate critical alerts | true |
+| `PublicIpUrl` | URL used to resolve external IP | https://api.ipify.org/ |
+| `PingTargets` | Targets used for connectivity/latency checks | 8.8.8.8, 1.1.1.1 |
+| `MonitoredServices` | Windows service names monitored for stopped state | DNS/Spooler/etc |
 
 ### Alert Thresholds
 
@@ -165,7 +173,10 @@ Thresholds are configured in the agent's `appsettings.json` file and can be cust
     "DiskQueueCritical": 3.0,
     "DiskQueueSustainedMinutes": 15,
     "HeartbeatTimeoutMinutes": 5,
-    "WindowsUpdatePendingDays": 7
+    "WindowsUpdatePendingDays": 7,
+    "PasswordMaxAgeDays": 31,
+    "PingLatencyWarningMs": 200,
+    "CriticalUpdatesPendingDays": 7
   }
 }
 ```
@@ -179,7 +190,10 @@ Default threshold values:
 | CPU Usage | > 85% | > 95% | Sustained for 10 min |
 | Disk Queue Length | N/A | > 3 | Sustained for 15 min |
 | Heartbeat Timeout | N/A | > 5 minutes | Machine offline |
-| Windows Updates | N/A | > 7 days | Since last update |
+| Windows Updates | Available critical/important updates | > 7 days | Since last successful update |
+| AD Password Age | > 31 days | N/A | Per domain user |
+| Ping Latency | > 200ms | N/A | Per configured target |
+| Ping Status | N/A | Not Success | Per configured target |
 | Antivirus Status | Outdated | Disabled | Security risk |
 | Critical Services | N/A | Stopped | Service failure |
 
@@ -189,7 +203,7 @@ To customize thresholds, edit the agent's `appsettings.json` before installation
 
 Configure alert channels in Azure Function App settings (see the [Azure Deployment Guide](docs/AZURE_DEPLOYMENT.md) for details):
 
-- **Email Alerts**: Set `EmailAlerts_Enabled=true` and `EmailAlerts_To`
+- **Email Alerts**: Set `EmailAlerts_Enabled=true`, `EmailAlerts_From`, `EmailAlerts_To`, and `SendGridApiKey`
 - **Teams Alerts**: Set `TeamsAlerts_WebhookUrl` with your webhook URL
 - **Generic Webhook**: Set `GenericWebhook_Url` for custom integrations
 - **Heartbeat Timeout**: Set `HeartbeatTimeoutMinutes` (default: 5)
@@ -198,15 +212,15 @@ Configure alert channels in Azure Function App settings (see the [Azure Deployme
 
 ### View Telemetry Data
 
-Query Azure Table Storage using Storage Explorer or Azure Portal:
+Query Azure Cosmos DB using Data Explorer or Azure Portal:
 
-**Machines Table**: Current status of all monitored machines
-- Partition Key: `machines`
-- Row Key: `AgentId` (base64-encoded domain\machine)
+**Machines Container**: Current status of all monitored machines
+- Partition Key: `/agentId`
+- Document id: `AgentId`
 
-**Telemetry Table**: Historical metrics
-- Partition Key: `AgentId`
-- Row Key: `InvertedTicks_Category_MetricName` (sorted newest first)
+**Telemetry Container**: Historical metrics
+- Partition Key: `/agentId`
+- Document id: `{AgentId}_{EncodedMetricKey}`
 
 ### Application Insights
 
@@ -221,8 +235,9 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 **Email**: Configure SMTP or SendGrid
 ```json
 "EmailAlerts_Enabled": "true",
+"EmailAlerts_From": "noc-alerts@yourdomain.com",
 "EmailAlerts_To": "alerts@yourdomain.com",
-"SendGrid_ApiKey": "your-sendgrid-key"
+"SendGridApiKey": "your-sendgrid-key"
 ```
 
 **Microsoft Teams**: Create an incoming webhook
@@ -269,8 +284,8 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 
 **500 Internal Server errors**
 - Check Application Insights for exceptions
-- Verify storage account connection string is valid
-- Ensure tables and queues are created
+- Verify `AzureWebJobsStorage` and `CosmosDbConnectionString` are valid
+- Ensure Cosmos DB database/containers (`awomsnoc`, `machines`, `telemetry`) exist
 
 **No alerts being sent**
 - Verify alert configuration in Function App settings
@@ -287,76 +302,22 @@ az monitor app-insights query --app <app-insights-name> --analytics-query "trace
 - Ensure service runs with sufficient privileges
 - Some metrics (registry, WMI) require administrator access
 
-## Development Setup
-
-### Building from Source
-
-```powershell
-# Clone repository
-git clone https://github.com/AWOMS/awoms-noc-agent.git
-cd awoms-noc-agent
-
-# Restore and build
-dotnet restore
-dotnet build
-
-# Run agent locally (not as service)
-cd src/AWOMS.NOC.Agent
-dotnet run
-
-# Run Functions locally
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Testing
-
-```powershell
-# Build agent for Windows
-dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj -c Release -r win-x64 --self-contained
-
-# Test Functions locally with Azurite
-# Install Azurite: npm install -g azurite
-azurite --silent --location ./azurite --debug ./azurite/debug.log
-cd src/AWOMS.NOC.Functions
-func start
-```
-
-### Project Structure
-
-```
-awoms-noc-agent/
-├── .github/workflows/          # CI/CD pipelines
-│   ├── build-agent.yml         # Build and release agent
-│   └── deploy-functions.yml    # Deploy Azure Functions
-├── docs/                       # Documentation
-│   └── AZURE_DEPLOYMENT.md     # Manual Azure deployment guide
-├── scripts/                    # PowerShell scripts
-│   ├── Install-Agent.ps1       # Agent installer
-│   └── Uninstall-Agent.ps1     # Agent uninstaller
-├── src/
-│   ├── AWOMS.NOC.Shared/       # Shared models and constants
-│   ├── AWOMS.NOC.Agent/        # Windows Service agent
-│   └── AWOMS.NOC.Functions/    # Azure Functions
-└── AWOMS.NOC.sln               # Solution file
-```
-
 ## Network Requirements
 
 The agent requires outbound HTTPS (port 443) access to:
 - `*.azurewebsites.net` (your Function App)
-- `*.table.core.windows.net` (if direct table access)
-- `*.queue.core.windows.net` (if direct queue access)
+- `*.table.core.windows.net` (Azure Table Storage)
+- `*.queue.core.windows.net` (Azure Queue Storage)
 
-Ensure your firewall (SonicWall TZ470 or other) allows these connections from your VLANs.
+Ensure your firewall allows these connections from your VLANs.
 
 ## Cost Estimates
 
-Based on 50 machines reporting every 5 minutes:
-- Azure Functions (Consumption): ~$2-3/month
-- Storage (Table + Queue): ~$1-2/month
+Based on 15 machines reporting every 5 minutes:
+- Azure Functions (Consumption): ~$1/month
+- Storage (Tables + Queue): <$1/month
 - Application Insights: ~$1/month (with sampling)
-- **Total: < $5/month**
+- **Total: < $2/month**
 
 Costs scale linearly with machine count and reporting frequency.
 
@@ -372,15 +333,11 @@ Costs scale linearly with machine count and reporting frequency.
 
 ## Contributing
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+Contributions are welcome! For development setup, testing, commit guidelines, and architecture details, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Copyright © 2024 AWOMS. All rights reserved.
+Copyright © 2026 AWOMS. All rights reserved.
 
 This software is proprietary and confidential. Unauthorized copying, distribution, or use is strictly prohibited.
 
@@ -392,11 +349,4 @@ For issues, questions, or feature requests:
 
 ## Changelog
 
-### v1.0.0 (Initial Release)
-- ✨ Complete NOC monitoring solution
-- 📊 8 metric collector types
-- 🚨 Multi-channel alerting (Email, Teams, Webhook)
-- 💾 Azure Table Storage for telemetry
-- 🔐 Azure Key Vault integration
-- 🤖 GitHub Actions CI/CD
-- 📖 Comprehensive documentation
+📜 See [CHANGELOG.md](CHANGELOG.md) for release history and version updates.

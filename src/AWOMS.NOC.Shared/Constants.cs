@@ -2,9 +2,10 @@ namespace AWOMS.NOC.Shared;
 
 public static class Constants
 {
-    // Table Storage Names
-    public const string MachineTableName = "machines";
-    public const string TelemetryTableName = "telemetry";
+    // Azure Table Storage
+    public const string MachinesTableName = "machines";
+    public const string MetricSnapshotTableName = "machinemetrics";
+    public const string MetricHistoryTableName = "metrichistory";
     
     // Queue Storage Names
     public const string AlertsQueueName = "alerts";

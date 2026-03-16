@@ -5,16 +5,12 @@ namespace AWOMS.NOC.Agent.Collectors;
 
 public class ServiceMetricCollector : IMetricCollector
 {
-    // Critical services to monitor - can be configured via appsettings
-    private readonly string[] _criticalServices = new[]
+    private readonly string[] _criticalServices;
+
+    public ServiceMetricCollector(AgentConfiguration configuration)
     {
-        "Dnscache",        // DNS Client
-        "LanmanServer",    // Server (file sharing)
-        "LanmanWorkstation", // Workstation
-        "Spooler",         // Print Spooler
-        "W32Time",         // Windows Time
-        "WinDefend"        // Windows Defender
-    };
+        _criticalServices = configuration.MonitoredServices;
+    }
 
     public Task<List<MetricData>> CollectAsync()
     {
