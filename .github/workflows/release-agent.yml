@@ -1,0 +1,46 @@
+name: Release Agent
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/AWOMS.NOC.Agent/**'
+      - 'src/AWOMS.NOC.Shared/**'
+      - '.github/workflows/release-agent.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GH_TOKEN }}
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 'lts/*'
+
+    - name: Install semantic-release plugins
+      run: |
+        npm install -g \
+          semantic-release \
+          @semantic-release/changelog \
+          @semantic-release/git \
+          conventional-changelog-conventionalcommits
+
+    - name: Run semantic-release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        GIT_AUTHOR_NAME: github-actions[bot]
+        GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+        GIT_COMMITTER_NAME: github-actions[bot]
+        GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+      run: npx semantic-release

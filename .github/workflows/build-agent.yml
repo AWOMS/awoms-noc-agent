@@ -2,12 +2,7 @@ name: Build Agent
 
 on:
   push:
-    branches: [ main ]
     tags: [ 'v*' ]
-    paths:
-      - 'src/AWOMS.NOC.Agent/**'
-      - 'src/AWOMS.NOC.Shared/**'
-      - '.github/workflows/build-agent.yml'
   pull_request:
     branches: [ main ]
     paths:
@@ -77,9 +72,9 @@ jobs:
       with:
         files: |
           AWOMS.NOC.Agent-win-x64.zip
+        append_body: true
         body: |
-          ## AWOMS NOC Agent Release ${{ github.ref_name }}
-          
+          ---
           ### Installation
           1. Download `AWOMS.NOC.Agent-win-x64.zip`
           2. Extract to a temporary directory
@@ -87,9 +82,6 @@ jobs:
           ```powershell
           .\Install-Agent.ps1 -ApiEndpoint "https://your-function-app.azurewebsites.net" -ApiKey "your-api-key"
           ```
-          
-          ### What's Changed
-          See commit history for details.
         draft: false
         prerelease: false
       env:

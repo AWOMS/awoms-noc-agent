@@ -6,11 +6,17 @@ using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+const string outputTemplate =
+    "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{Caller}] {Message:lj}{NewLine}{Exception}";
+
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
-    .WriteTo.Console()
+    .Enrich.FromLogContext()
+    .Enrich.With<CallerEnricher>()
+    .WriteTo.Console(outputTemplate: outputTemplate)
     .WriteTo.File(
         path: @"C:\AWOMS\Logs\AWOMS.NOC.Agent\agent-.log",
+        outputTemplate: outputTemplate,
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 14,
         shared: true)
