@@ -7,6 +7,7 @@ on:
       - 'src/AWOMS.NOC.Agent/**'
       - 'src/AWOMS.NOC.Shared/**'
       - '.github/workflows/release-agent.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,6 +17,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
 
     steps:
     - uses: actions/checkout@v4
@@ -28,19 +32,62 @@ jobs:
       with:
         node-version: 'lts/*'
 
-    - name: Install semantic-release plugins
-      run: |
-        npm install -g \
-          semantic-release \
-          @semantic-release/changelog \
-          @semantic-release/git \
-          conventional-changelog-conventionalcommits
-
     - name: Run semantic-release
+      id: semantic
+      uses: cycjimmy/semantic-release-action@v4
+      with:
+        extra_plugins: |
+          @semantic-release/changelog
+          @semantic-release/git
+          conventional-changelog-conventionalcommits
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         GIT_AUTHOR_NAME: github-actions[bot]
         GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
         GIT_COMMITTER_NAME: github-actions[bot]
         GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
-      run: npx semantic-release
+
+  build-and-upload:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: v${{ needs.release.outputs.version }}
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj
+
+    - name: Build
+      run: dotnet build src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj --configuration Release --no-restore
+
+    - name: Publish Windows x64
+      run: |
+        dotnet publish src/AWOMS.NOC.Agent/AWOMS.NOC.Agent.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          --output ./publish/win-x64 `
+          /p:PublishSingleFile=true `
+          /p:PublishTrimmed=false
+
+    - name: Copy installation scripts
+      run: |
+        Copy-Item scripts/Install-Agent.ps1 ./publish/win-x64/
+        Copy-Item scripts/Uninstall-Agent.ps1 ./publish/win-x64/
+
+    - name: Create ZIP archive
+      run: Compress-Archive -Path ./publish/win-x64/* -DestinationPath ./AWOMS.NOC.Agent-win-x64.zip
+
+    - name: Upload ZIP to GitHub release
+      run: gh release upload v${{ needs.release.outputs.version }} AWOMS.NOC.Agent-win-x64.zip --clobber
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
